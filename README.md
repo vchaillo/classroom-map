@@ -1,19 +1,25 @@
 # Classroom Map
 
-A static classroom seating planner with 35 example students, four rows and four two-person desks per row by default. Students, rows and desks per row can be adjusted. Student management and seat assignment use modal dialogs. Data stays in browser localStorage on the current device.
+A static high-school classroom seating planner. Fresh installations include Seconde A (35 students), Première C (32) and Terminale B (30), each with five rows and four two-person desks per row.
+
+## Features
+
+- Independent students, room dimensions and seating for each class.
+- Class switching, creation, duplication and confirmed deletion.
+- Inline class renaming: click the title or pencil, type, then press Enter or click elsewhere to save. Escape cancels.
+- Student management and unplaced-student selection in modal dialogs.
+- Local browser persistence and migration of the previous single-class plan, preserving its settings and seating.
+
+New classes start empty with five rows and four desks per row. Duplicate classes copy student names and seating with independent identities.
 
 ## Files
 
-- `index.html`: accessible page structure.
-- `styles.css`: responsive layout and styles.
-- `app.js`: seating, student management and local persistence.
+`index.html`, `styles.css` and `app.js` contain the complete app. No build step or external dependency is required.
 
-## Local preview
+## Development
 
-Run `python3 -m http.server 8000` in this directory, then open `http://localhost:8000`.
+Run `python3 -m http.server 8000` in this directory and open `http://localhost:8000`.
 
-## GitHub Pages
+## Deployment
 
-Push the files to the `main` branch of a repository named `classroom-map`. In **Settings → Pages**, select **GitHub Actions** as the source. The included workflow publishes only the three application files and redeploys after every push to `main`.
-
-The initial 32 seats accommodate 32 students; three students remain unplaced until the room is enlarged. Reducing the room keeps displaced students in the list. Reducing the student count requires confirmation before deleting the last students.
+GitHub Pages uses the included `.github/workflows/pages.yml` workflow. Each push to `main` deploys the three application files automatically. Data is stored on the current browser/device and is not synchronized between devices.

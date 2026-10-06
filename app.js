@@ -1,28 +1,43 @@
 (() => {
   "use strict";
   const $ = id => document.getElementById(id);
-  const storageKey = "classroom-map-configurable-v2";
+  const storageKey = "classroom-map-multiclass-v3";
   const examples = ["Alice Martin","Lucas Bernard","Emma Dubois","Louis Petit","Jade Moreau","Gabriel Laurent","Louise Simon","Arthur Michel","Chloé Lefebvre","Raphaël Leroy","Lina Roux","Maël David","Rose Bertrand","Noah Morel","Anna Fournier","Adam Girard","Mia André","Paul Mercier","Léa Dupont","Hugo Lambert","Inès Bonnet","Sacha François","Julia Fontaine","Léo Rousseau","Élise Vincent","Nathan Muller","Sarah Garnier","Ethan Faure","Manon Chevalier","Tom Robin","Zoé Gauthier","Nolan Masson","Eva Henry","Victor Roussel","Clara Nicolas"];
   let serial = 0;
   const makeId = () => Date.now().toString(36) + "-" + (++serial) + "-" + Math.random().toString(36).slice(2,8);
-  const defaults = () => { const students = examples.map(name => ({id:makeId(),name})); return {className:"Ma classe",rows:4,columns:4,students,seats:students.slice(0,32).map(s=>s.id)}; };
-  let state;
+  function makeClass(className, count=35, offset=0) {
+    const students=Array.from({length:count},(_,i)=>({id:makeId(),name:examples[(i+offset)%examples.length]}));
+    return {id:makeId(),className,rows:5,columns:4,students,seats:Array.from({length:40},(_,i)=>students[i]?.id||null)};
+  }
+  function normalizeClass(saved) {
+    if(!saved || !Array.isArray(saved.students) || !Array.isArray(saved.seats) || !Number.isInteger(saved.rows) || saved.rows<1 || saved.rows>12 || !Number.isInteger(saved.columns) || saved.columns<1 || saved.columns>8) throw new Error("Invalid saved class");
+    const studentIds=new Set();
+    const students=saved.students.filter(s=>s && typeof s.id==="string" && typeof s.name==="string" && !studentIds.has(s.id) && (studentIds.add(s.id),true)).slice(0,200);
+    const seen=new Set();
+    const seats=Array.from({length:saved.rows*saved.columns*2},(_,i)=>{const id=saved.seats[i];if(!id || seen.has(id) || !students.some(s=>s.id===id))return null;seen.add(id);return id;});
+    return {...saved,id:typeof saved.id==="string"?saved.id:makeId(),className:typeof saved.className==="string"&&saved.className.trim()?saved.className.slice(0,60):"Ma classe",students,seats};
+  }
+  let data;
   try {
-    const saved = JSON.parse(localStorage.getItem(storageKey));
-    if (!saved || !Array.isArray(saved.students) || !Array.isArray(saved.seats) || !Number.isInteger(saved.rows) || saved.rows < 1 || saved.rows > 12 || !Number.isInteger(saved.columns) || saved.columns < 1 || saved.columns > 8) throw new Error("Invalid saved state");
-    state = saved;
-    const studentIds = new Set();
-    state.students = state.students.filter(s => s && typeof s.id === "string" && typeof s.name === "string" && !studentIds.has(s.id) && (studentIds.add(s.id),true)).slice(0,200);
-    const seen = new Set();
-    state.seats = Array.from({length:state.rows*state.columns*2},(_,i) => {const id=saved.seats[i]; if(!id || seen.has(id) || !state.students.some(s=>s.id===id)) return null; seen.add(id); return id;});
-    state.className = typeof state.className === "string" ? state.className : "Ma classe";
-  } catch { state = defaults(); }
+    const saved=JSON.parse(localStorage.getItem(storageKey));
+    if(!saved || !Array.isArray(saved.classes) || !saved.classes.length)throw new Error("No saved classes");
+    const ids=new Set();
+    const classes=saved.classes.map(normalizeClass).filter(c=>!ids.has(c.id)&&(ids.add(c.id),true));
+    data={classes,active:saved.active};
+  } catch {
+    const classes=[makeClass("Seconde A"),makeClass("Première C",32,9),makeClass("Terminale B",30,17)];
+    // Preserve the previous single-class plan as the first class during migration.
+    try {const legacy=JSON.parse(localStorage.getItem("classroom-map-configurable-v2"));if(legacy){const migrated=normalizeClass(legacy);if(migrated.className==="Ma classe")migrated.className="Seconde A";classes[0]=migrated;}}catch{}
+    data={classes,active:classes[0].id};
+  }
+  if(!data.classes.some(c=>c.id===data.active))data.active=data.classes[0].id;
+  let state=data.classes.find(c=>c.id===data.active);
   let selected=null, editing=null, targetSeat=null, listMode="manage", returnToList=false, confirmation=null, toastTimer;
   const initials = name => name.trim().split(/\s+/).slice(0,2).map(p=>p[0]).join("").toUpperCase();
   const positionText = index => "Rangée "+(Math.floor(index/(state.columns*2))+1)+" · place "+(index%(state.columns*2)+1);
   function element(tag, className, text) {const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;}
   function notify(message) {$("toast").textContent=message;$("toast").hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$("toast").hidden=true,3200);}
-  function save() {try{localStorage.setItem(storageKey,JSON.stringify(state));$("saveStatus").textContent="Modifications enregistrées sur cet appareil";}catch{$("saveStatus").textContent="Session temporaire · sauvegarde indisponible";}}
+  function save() {try{localStorage.setItem(storageKey,JSON.stringify(data));$("saveStatus").textContent="Modifications enregistrées sur cet appareil";}catch{$("saveStatus").textContent="Session temporaire · sauvegarde indisponible";}}
   function confirmAction(title, description, action) {$("confirmTitle").textContent=title;$("confirmDescription").textContent=description;confirmation=action;$("confirmDialog").showModal();}
   function placeStudent(id,index) {if(!state.students.some(s=>s.id===id)||index<0||index>=state.seats.length)return;const previous=state.seats.indexOf(id), occupant=state.seats[index];if(previous>=0)state.seats[previous]=occupant;state.seats[index]=id;selected=null;save();render();}
   function openList(mode="manage",index=null) {listMode=mode;targetSeat=index;$("search").value="";renderList();$("listDialog").showModal();}
@@ -51,7 +66,36 @@
     });
   }
   function openStudentDialog(id=null) {editing=id;returnToList=$("listDialog").open;if(returnToList)$("listDialog").close();$("dialogTitle").textContent=id?"Modifier l’élève":"Ajouter des élèves";$("dialogDescription").textContent=id?"Modifiez le prénom ou le nom de cet élève.":"Ajoutez un ou plusieurs élèves, avec un nom par ligne.";$("names").value=id?state.students.find(s=>s.id===id).name:"";$("names").setCustomValidity("");$("studentDialog").showModal();$("names").focus();}
+  function renderClassSelect() {
+    $("classSelect").replaceChildren();
+    data.classes.forEach(c=>{const option=element("option","",c.className);option.value=c.id;$("classSelect").append(option);});
+    $("classSelect").value=data.active;
+  }
+  function switchClass(id) {finishRename();data.active=id;state=data.classes.find(c=>c.id===id);selected=null;save();render();}
+  function finishRename() {
+    state.className=$("className").value.trim().replace(/\s+/g," ").slice(0,60)||state.className||"Ma classe";
+    $("className").value=state.className;save();renderClassSelect();
+  }
+  function renderClasses() {
+    $("classList").replaceChildren();
+    data.classes.forEach(c=>{
+      const row=element("div","class-row"+(c.id===data.active?" current":""));
+      const info=element("div","class-info");
+      const name=element("input","class-row-name");name.value=c.className;name.maxLength=60;name.setAttribute("aria-label","Nom de "+c.className);
+      let original=c.className;
+      const commit=()=>{c.className=name.value.trim().replace(/\s+/g," ").slice(0,60)||c.className;name.value=c.className;original=c.className;save();render();};
+      name.onblur=commit;name.onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();name.blur();}if(e.key==="Escape"){name.value=original;name.blur();}};
+      info.append(name,element("small","",c.students.length+" élèves · "+c.rows+" rangées"+(c.id===data.active?" · Classe active":"")));
+      const open=element("button","",c.id===data.active?"Ouverte":"Ouvrir");open.onclick=()=>{switchClass(c.id);$("classesDialog").close();};
+      const copy=element("button","icon-btn","⧉");copy.setAttribute("aria-label","Dupliquer "+c.className);
+      copy.onclick=()=>{const ids=new Map();const students=c.students.map(s=>{const id=makeId();ids.set(s.id,id);return{id,name:s.name};});data.classes.push({...c,id:makeId(),className:(c.className+" — copie").slice(0,60),students,seats:c.seats.map(id=>ids.get(id)||null)});save();render();renderClasses();notify("Classe dupliquée.");};
+      const remove=element("button","icon-btn","×");remove.setAttribute("aria-label","Supprimer "+c.className);remove.disabled=data.classes.length===1;
+      remove.onclick=()=>confirmAction("Supprimer "+c.className+" ?","La classe, ses élèves et son placement seront supprimés.",()=>{data.classes=data.classes.filter(x=>x.id!==c.id);if(data.active===c.id){data.active=data.classes[0].id;state=data.classes[0];}selected=null;save();render();renderClasses();});
+      row.append(info,open,copy,remove);$("classList").append(row);
+    });
+  }
   function render() {
+    renderClassSelect();
     $("rows").value=state.rows;$("columns").value=state.columns;$("studentNumber").value=state.students.length;
     if(document.activeElement!==$("className"))$("className").value=state.className||"Ma classe";
     const placed=state.seats.filter(Boolean).length, shortage=Math.max(0,state.students.length-state.seats.length);
@@ -93,11 +137,21 @@
   $("manageStudents").onclick=()=>openList();$("closeList").onclick=()=>$("listDialog").close();$("addButton").onclick=()=>openStudentDialog();$("search").oninput=renderList;
   $("closeStudentDialog").onclick=()=>$("studentDialog").close();
   $("studentDialog").addEventListener("close",()=>{if(returnToList){returnToList=false;renderList();$("listDialog").showModal();}});
-  $("className").oninput=()=>{state.className=$("className").value;save();};$("className").onblur=()=>{if(!state.className.trim()){state.className="Ma classe";save();render();}};
+  let originalName=state.className;
+  $("className").onfocus=()=>{originalName=state.className;};
+  $("className").onblur=finishRename;
+  $("className").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();$("className").blur();}if(e.key==="Escape"){$("className").value=originalName;$("className").blur();}};
+  $("renameClass").onclick=()=>{$("className").focus();$("className").select();};
+  $("classSelect").onchange=()=>switchClass($("classSelect").value);
+  $("manageClasses").onclick=()=>{renderClasses();$("classesDialog").showModal();};
+  $("closeClasses").onclick=()=>$("classesDialog").close();
+  $("newClassForm").onsubmit=e=>{e.preventDefault();const name=$("newClassName").value.trim().replace(/\s+/g," ");if(!name){$("newClassName").setCustomValidity("Saisissez le nom de la classe.");$("newClassName").reportValidity();return;}const created=makeClass(name.slice(0,60),0);data.classes.push(created);switchClass(created.id);$("newClassName").value="";$("classesDialog").close();};
+  $("newClassName").oninput=()=>$("newClassName").setCustomValidity("");
   $("studentForm").onsubmit=e=>{e.preventDefault();const names=$("names").value.split(/\r?\n/).map(n=>n.trim()).filter(Boolean);if(!names.length){$("names").setCustomValidity("Saisissez au moins un nom.");$("names").reportValidity();return;}if(!editing&&state.students.length+names.length>200){$("names").setCustomValidity("La classe peut contenir au maximum 200 élèves.");$("names").reportValidity();return;}if(editing){const student=state.students.find(s=>s.id===editing);if(student)student.name=names.join(" ");}else state.students.push(...names.map(name=>({id:makeId(),name})));save();render();$("studentDialog").close();};
   $("names").oninput=()=>$("names").setCustomValidity("");$("cancelSelection").onclick=()=>{selected=null;render();};$("unplace").onclick=()=>{state.seats=state.seats.map(id=>id===selected?null:id);selected=null;save();render();};
   $("shuffle").onclick=()=>{const apply=()=>{const ids=state.students.map(s=>s.id);for(let i=ids.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[ids[i],ids[j]]=[ids[j],ids[i]];}state.seats=Array.from({length:state.rows*state.columns*2},(_,i)=>ids[i]||null);selected=null;save();render();};if(state.seats.some(Boolean))confirmAction("Redistribuer les places ?","Les élèves seront répartis au hasard. Les élèves restants apparaîtront dans la liste des non placés.",apply);else apply();};
   $("clear").onclick=()=>confirmAction("Libérer toutes les places ?","Les élèves resteront dans votre liste.",()=>{state.seats.fill(null);selected=null;save();render();});
   $("cancelConfirm").onclick=()=>{confirmation=null;$("confirmDialog").close();};$("acceptConfirm").onclick=()=>{const action=confirmation;confirmation=null;$("confirmDialog").close();if(action)action();};$("confirmDialog").addEventListener("cancel",()=>confirmation=null);
   render();
+  save();
 })();

@@ -9,17 +9,18 @@
   <script src="app.js" defer></script>
 </head>
 <body>
-<header><div><h1>▦ Classroom Map</h1><p>Votre plan de classe, simplement.</p></div><span id="saveStatus">Sauvegarde locale automatique</span></header>
+<header><div><h1>▦ Classroom Map</h1><p>Votre plan de classe, simplement.</p></div><div class="class-switcher"><select id="classSelect" aria-label="Classe active"></select><button id="manageClasses">Gérer les classes</button></div></header>
 <main><section class="panel" aria-label="Plan de classe">
-  <div class="toolbar"><div><input id="className" class="class-name" aria-label="Nom de la classe" maxlength="50"><p id="stats"></p></div><div class="tools"><button id="manageStudents" class="primary">Gérer les élèves</button><button id="shuffle">Répartir au hasard</button><button id="clear">Libérer les places</button></div></div>
+  <div class="toolbar"><div><div class="class-title"><input id="className" class="class-name" aria-label="Nom de la classe" maxlength="60" title="Cliquez pour renommer la classe"><button id="renameClass" class="icon-btn" aria-label="Renommer la classe">✎</button></div><p id="stats"></p></div><div class="tools"><button id="manageStudents" class="primary">Gérer les élèves</button><button id="shuffle">Répartir au hasard</button><button id="clear">Libérer les places</button></div></div>
   <div class="settings"><div class="fields"><label>Rangées <input id="rows" type="number" min="1" max="12" step="1"></label><label>Tables par rangée <input id="columns" type="number" min="1" max="8" step="1"></label><label>Élèves <input id="studentNumber" type="number" min="0" max="200" step="1"></label></div><span id="capacity"></span></div>
   <div id="selectionBar" class="selection" hidden><span id="selectionText"></span><div><button id="unplace">Retirer du plan</button><button id="cancelSelection">Annuler</button></div></div>
   <div id="notice" class="notice" hidden></div>
   <div class="room-scroll"><div id="room" class="room"><div class="front"><div class="board">TABLEAU</div></div><div id="desks" class="desks"></div></div></div>
-  <div class="legend"><span>Cliquez sur une place libre pour choisir un élève non placé.</span><span id="freeCount"></span></div>
+  <div class="legend"><span>Cliquez sur une place libre pour choisir un élève non placé.</span><span id="freeCount"></span><span id="saveStatus">Sauvegarde sur cet appareil</span></div>
 </section></main>
 <dialog id="listDialog" aria-labelledby="listTitle"><div class="modal-header"><h2 id="listTitle"></h2><button id="closeList" class="close" aria-label="Fermer">×</button></div><p id="listDescription"></p><input id="search" class="search" type="search" placeholder="Rechercher un élève…" aria-label="Rechercher un élève"><div id="studentList" class="list"></div><div class="modal-footer"><span id="listCount"></span><button id="addButton" class="primary">＋ Ajouter des élèves</button></div></dialog>
 <dialog id="studentDialog" aria-labelledby="dialogTitle"><form id="studentForm"><h2 id="dialogTitle"></h2><p id="dialogDescription"></p><label for="names">Prénom et nom</label><textarea id="names" placeholder="Alice Martin&#10;Lucas Bernard" required maxlength="8000"></textarea><div class="actions"><button id="closeStudentDialog" type="button">Annuler</button><button type="submit" class="primary">Enregistrer</button></div></form></dialog>
 <dialog id="confirmDialog" aria-labelledby="confirmTitle"><h2 id="confirmTitle"></h2><p id="confirmDescription"></p><div class="actions"><button id="cancelConfirm">Annuler</button><button id="acceptConfirm" class="primary">Confirmer</button></div></dialog>
+<dialog id="classesDialog" aria-labelledby="classesTitle"><div class="modal-header"><h2 id="classesTitle">Mes classes</h2><button id="closeClasses" class="close" aria-label="Fermer les classes">×</button></div><p>Chaque classe conserve ses élèves, ses tables et son placement. Cliquez sur son nom pour le modifier.</p><div id="classList" class="list"></div><form id="newClassForm" class="new-class-form"><label for="newClassName">Nouvelle classe</label><input id="newClassName" placeholder="Par exemple : Seconde B" required maxlength="60"><button class="primary" type="submit">Créer la classe</button></form></dialog>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 </body></html>
