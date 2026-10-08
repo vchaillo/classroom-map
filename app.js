@@ -3,6 +3,42 @@ import { connect, login, logout, persist } from "./firebase.js";
 (() => {
   "use strict";
   const $ = id => document.getElementById(id);
+  const studentColors = [
+    {id:"yellow",name:"Jaune",border:"#c89412",background:"#fff4c2"},
+    {id:"orange",name:"Orange",border:"#dc7726",background:"#ffe7cf"},
+    {id:"pink",name:"Rose",border:"#ce6392",background:"#ffe1ee"},
+    {id:"red",name:"Rouge",border:"#d25858",background:"#ffe1e1"},
+    {id:"purple",name:"Violet",border:"#9668c5",background:"#eee2ff"},
+    {id:"blue",name:"Bleu",border:"#478ecb",background:"#deefff"},
+    {id:"green",name:"Vert",border:"#479d76",background:"#ddf5e7"}
+  ];
+  function applyStudentColor(node, student) {
+    const color=studentColors.find(c=>c.id===student.color);
+    if(!color)return;
+    node.classList.add("student-colored");
+    node.style.setProperty("--student-color",color.border);
+    node.style.setProperty("--student-background",color.background);
+  }
+  function colorPicker(student) {
+    const picker=element("details","color-picker");
+    const summary=element("summary","color-toggle");
+    const current=studentColors.find(c=>c.id===student.color);
+    summary.title="Couleur de "+student.name+" : "+(current?.name||"Aucune");
+    summary.setAttribute("aria-label",summary.title);
+    summary.style.background=current?.border||"#ffffff";
+    if(!current)summary.append(element("span","","∅"));
+    const choices=element("div","color-options");
+    [null,...studentColors].forEach(color=>{
+      const button=element("button","color-choice"+((color?.id||"")===(student.color||"")?" chosen":""),color?"":"∅");
+      button.type="button";button.title=color?.name||"Aucune";
+      button.setAttribute("aria-label",button.title);
+      button.setAttribute("aria-pressed",String((color?.id||"")===(student.color||"")));
+      button.style.background=color?.border||"#ffffff";
+      button.onclick=()=>{student.color=color?.id||"";save();render();renderList();};
+      choices.append(button);
+    });
+    picker.append(summary,choices);return picker;
+  }
   let serial = 0;
   const makeId = () => Date.now().toString(36) + "-" + (++serial) + "-" + Math.random().toString(36).slice(2,8);
   function makeClass(className) {
@@ -11,7 +47,7 @@ import { connect, login, logout, persist } from "./firebase.js";
   function normalizeClass(saved) {
     if(!saved || !Array.isArray(saved.students) || !Array.isArray(saved.seats) || !Number.isInteger(saved.rows) || saved.rows<1 || saved.rows>12 || !Number.isInteger(saved.columns) || saved.columns<1 || saved.columns>8) throw new Error("Invalid saved class");
     const studentIds=new Set();
-    const students=saved.students.filter(s=>s && typeof s.id==="string" && typeof s.name==="string" && !studentIds.has(s.id) && (studentIds.add(s.id),true)).slice(0,200);
+    const students=saved.students.filter(s=>s && typeof s.id==="string" && typeof s.name==="string" && !studentIds.has(s.id) && (studentIds.add(s.id),true)).slice(0,200).map(s=>({...s,color:studentColors.some(c=>c.id===s.color)?s.color:""}));
     const seen=new Set();
     const seats=Array.from({length:saved.rows*saved.columns*2},(_,i)=>{const id=saved.seats[i];if(!id || seen.has(id) || !students.some(s=>s.id===id))return null;seen.add(id);return id;});
     return {...saved,id:typeof saved.id==="string"?saved.id:makeId(),className:typeof saved.className==="string"&&saved.className.trim()?saved.className.slice(0,60):"Ma classe",students,seats};
@@ -29,7 +65,7 @@ import { connect, login, logout, persist } from "./firebase.js";
   function renderList() {
     const picker=listMode==="pick";
     $("listTitle").textContent=picker?"Choisir un élève":"Élèves de la classe";
-    $("listDescription").textContent=picker?positionText(targetSeat)+". Seuls les élèves non placés apparaissent ici.":"Ajoutez, modifiez ou supprimez les élèves de votre classe.";
+    $("listDescription").textContent=picker?positionText(targetSeat)+". Seuls les élèves non placés apparaissent ici.":"Cliquez sur la pastille pour choisir une couleur personnelle. Ces repères restent invisibles dans le PDF.";
     const available=state.students.filter(s=>!picker||!state.seats.includes(s.id)), query=$("search").value.trim().toLocaleLowerCase("fr"), filtered=available.filter(s=>s.name.toLocaleLowerCase("fr").includes(query));
     $("listCount").textContent=available.length+" élève"+(available.length>1?"s":"")+(picker?" à placer":" dans la classe");
     $("studentList").replaceChildren();
@@ -39,9 +75,11 @@ import { connect, login, logout, persist } from "./firebase.js";
       if(picker){item.type="button";item.onclick=()=>{const index=targetSeat;$("listDialog").close();placeStudent(student.id,index);};}
       const name=element("span","student-name",student.name), index=state.seats.indexOf(student.id);
       name.append(element("small","",index<0?"À placer":positionText(index)));
-      item.append(element("span","avatar",initials(student.name)),name);
+      const avatar=element("span","avatar",initials(student.name));applyStudentColor(avatar,student);
+      item.append(avatar,name);
       if(picker)item.append(element("span","","＋"));
       else {
+        item.append(colorPicker(student));
         const edit=element("button","icon-btn","✎"), remove=element("button","icon-btn","×");
         edit.setAttribute("aria-label","Modifier "+student.name);edit.onclick=()=>openStudentDialog(student.id);
         remove.setAttribute("aria-label","Supprimer "+student.name);remove.onclick=()=>confirmAction("Supprimer cet élève ?","« "+student.name+" » sera retiré de la liste et du plan.",()=>{state.students=state.students.filter(s=>s.id!==student.id);state.seats=state.seats.map(id=>id===student.id?null:id);if(selected===student.id)selected=null;save();render();renderList();});
@@ -74,7 +112,7 @@ import { connect, login, logout, persist } from "./firebase.js";
       info.append(name,element("small","",c.students.length+" élèves · "+c.rows+" rangées"+(c.id===data.active?" · Classe active":"")));
       const open=element("button","",c.id===data.active?"Ouverte":"Ouvrir");open.onclick=()=>{switchClass(c.id);$("classesDialog").close();};
       const copy=element("button","icon-btn","⧉");copy.setAttribute("aria-label","Dupliquer "+c.className);
-      copy.onclick=()=>{const ids=new Map();const students=c.students.map(s=>{const id=makeId();ids.set(s.id,id);return{id,name:s.name};});data.classes.push({...c,id:makeId(),className:(c.className+" — copie").slice(0,60),students,seats:c.seats.map(id=>ids.get(id)||null)});save();render();renderClasses();notify("Classe dupliquée.");};
+      copy.onclick=()=>{const ids=new Map();const students=c.students.map(s=>{const id=makeId();ids.set(s.id,id);return{...s,id};});data.classes.push({...c,id:makeId(),className:(c.className+" — copie").slice(0,60),students,seats:c.seats.map(id=>ids.get(id)||null)});save();render();renderClasses();notify("Classe dupliquée.");};
       const remove=element("button","icon-btn","×");remove.setAttribute("aria-label","Supprimer "+c.className);remove.disabled=false;
       remove.onclick=()=>confirmAction("Supprimer "+c.className+" ?","La classe, ses élèves et son placement seront supprimés.",()=>{data.classes=data.classes.filter(x=>x.id!==c.id);if(data.active===c.id){data.active=data.classes[0]?.id||null;state=data.classes[0]||null;}selected=null;save();render();renderClasses();});
       row.append(info,open,copy,remove);$("classList").append(row);
@@ -101,7 +139,7 @@ import { connect, login, logout, persist } from "./firebase.js";
       for(let side=0;side<2;side++){
         const index=table*2+side, student=state.students.find(s=>s.id===state.seats[index]), seat=element("button","seat"+(student?" occupied":"")+(student&&selected===student.id?" active":""));
         seat.type="button";seat.setAttribute("aria-label",positionText(index)+(student?", "+student.name:", choisir un élève"));seat.append(element("span","seat-number",index%(state.columns*2)+1));
-        if(student){seat.append(element("span","initial",initials(student.name)),element("span","seat-name",student.name));seat.draggable=true;seat.ondragstart=e=>{e.dataTransfer.setData("text/plain",student.id);e.dataTransfer.effectAllowed="move";};seat.ondragend=()=>document.querySelectorAll(".drag-over").forEach(el=>el.classList.remove("drag-over"));}
+        if(student){applyStudentColor(seat,student);seat.append(element("span","initial",initials(student.name)),element("span","seat-name",student.name));seat.draggable=true;seat.ondragstart=e=>{e.dataTransfer.setData("text/plain",student.id);e.dataTransfer.effectAllowed="move";};seat.ondragend=()=>document.querySelectorAll(".drag-over").forEach(el=>el.classList.remove("drag-over"));}
         else seat.append(element("span","plus","＋"),element("span","empty-label","Choisir un élève"));
         seat.onclick=()=>{if(!student){selected=null;render();openList("pick",index);}else if(selected&&selected!==student.id)placeStudent(selected,index);else{selected=selected===student.id?null:student.id;render();}};
         seat.ondragover=e=>{e.preventDefault();seat.classList.add("drag-over");};seat.ondragleave=()=>seat.classList.remove("drag-over");seat.ondrop=e=>{e.preventDefault();seat.classList.remove("drag-over");const id=e.dataTransfer.getData("text/plain");if(id)placeStudent(id,index);};desk.append(seat);
