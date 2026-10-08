@@ -1,3 +1,4 @@
+import { downloadClassPdf } from "./export-pdf.js";
 import { connect, login, logout, persist } from "./firebase.js";
 (() => {
   "use strict";
@@ -123,6 +124,7 @@ import { connect, login, logout, persist } from "./firebase.js";
     const removed=state.students.slice(count);render();
     confirmAction("Réduire la liste à "+count+" élèves ?","Les "+removed.length+" derniers élèves seront supprimés : "+removed.slice(0,4).map(s=>s.name).join(", ")+(removed.length>4?", …":".")+" Vous pouvez aussi les supprimer individuellement.",()=>{const ids=new Set(removed.map(s=>s.id));state.students=state.students.slice(0,count);state.seats=state.seats.map(id=>ids.has(id)?null:id);if(ids.has(selected))selected=null;save();render();});
   }
+  $("exportPdf").onclick=()=>{if(!state)return;finishRename();try{downloadClassPdf(state);}catch(error){notify("Impossible de générer le PDF : "+error.message);}};
   $("rows").onchange=resizeRoom;$("columns").onchange=resizeRoom;$("studentNumber").onchange=resizeStudents;
   $("manageStudents").onclick=()=>openList();$("closeList").onclick=()=>$("listDialog").close();$("addButton").onclick=()=>openStudentDialog();$("search").oninput=renderList;
   $("closeStudentDialog").onclick=()=>$("studentDialog").close();
