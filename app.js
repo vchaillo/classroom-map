@@ -41,39 +41,51 @@ import { connect, login, logout, persist } from "./firebase.js";
   }
   let serial = 0;
   const makeId = () => Date.now().toString(36) + "-" + (++serial) + "-" + Math.random().toString(36).slice(2,8);
+  function makeRoom(name="Salle 1") {
+    return {id:makeId(),name,rows:5,columns:4,seats:Array(40).fill(null)};
+  }
   function makeClass(className) {
-    return {id:makeId(),className,rows:5,columns:4,students:[],seats:Array(40).fill(null)};
+    const first=makeRoom();
+    return {id:makeId(),className,students:[],rooms:[first],activeRoom:first.id};
   }
   function normalizeClass(saved) {
-    if(!saved || !Array.isArray(saved.students) || !Array.isArray(saved.seats) || !Number.isInteger(saved.rows) || saved.rows<1 || saved.rows>12 || !Number.isInteger(saved.columns) || saved.columns<1 || saved.columns>8) throw new Error("Invalid saved class");
+    if(!saved || !Array.isArray(saved.students))throw new Error("Invalid saved class");
     const studentIds=new Set();
     const students=saved.students.filter(s=>s && typeof s.id==="string" && typeof s.name==="string" && !studentIds.has(s.id) && (studentIds.add(s.id),true)).slice(0,200).map(s=>({...s,color:studentColors.some(c=>c.id===s.color)?s.color:""}));
-    const seen=new Set();
-    const seats=Array.from({length:saved.rows*saved.columns*2},(_,i)=>{const id=saved.seats[i];if(!id || seen.has(id) || !students.some(s=>s.id===id))return null;seen.add(id);return id;});
-    return {...saved,id:typeof saved.id==="string"?saved.id:makeId(),className:typeof saved.className==="string"&&saved.className.trim()?saved.className.slice(0,60):"Ma classe",students,seats};
+    // Migrate the original single-room plan without changing its placement.
+    const sources=Array.isArray(saved.rooms)&&saved.rooms.length?saved.rooms:[{id:"legacy-room",name:"Salle 1",rows:saved.rows,columns:saved.columns,seats:saved.seats}];
+    const roomIds=new Set();
+    const rooms=sources.map(r=>{
+      if(!r || !Array.isArray(r.seats) || !Number.isInteger(r.rows) || r.rows<1 || r.rows>12 || !Number.isInteger(r.columns) || r.columns<1 || r.columns>8)throw new Error("Invalid saved room");
+      const id=typeof r.id==="string"&&!roomIds.has(r.id)?r.id:makeId();roomIds.add(id);
+      const seen=new Set();
+      const seats=Array.from({length:r.rows*r.columns*2},(_,i)=>{const pupil=r.seats[i];if(!studentIds.has(pupil)||seen.has(pupil)||!students.some(s=>s.id===pupil))return null;seen.add(pupil);return pupil;});
+      return {id,name:typeof r.name==="string"&&r.name.trim()?r.name.slice(0,60):"Salle",rows:r.rows,columns:r.columns,seats};
+    });
+    return {id:typeof saved.id==="string"?saved.id:makeId(),className:typeof saved.className==="string"&&saved.className.trim()?saved.className.slice(0,60):"Ma classe",students,rooms,activeRoom:rooms.some(r=>r.id===saved.activeRoom)?saved.activeRoom:rooms[0].id};
   }
-  let data={classes:[],active:null}, state=null, ready=false;
+  let data={classes:[],active:null}, state=null, room=null, ready=false;
   let selected=null, editing=null, targetSeat=null, listMode="manage", returnToList=false, confirmation=null, toastTimer;
   const initials = name => name.trim().split(/\s+/).slice(0,2).map(p=>p[0]).join("").toUpperCase();
-  const positionText = index => "Rangée "+(Math.floor(index/(state.columns*2))+1)+" · place "+(index%(state.columns*2)+1);
+  const positionText = index => "Rangée "+(Math.floor(index/(room.columns*2))+1)+" · place "+(index%(room.columns*2)+1);
   function element(tag, className, text) {const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;}
   function notify(message) {$("toast").textContent=message;$("toast").hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$("toast").hidden=true,3200);}
   function save() { if(ready) persist(data); }
   function confirmAction(title, description, action) {$("confirmTitle").textContent=title;$("confirmDescription").textContent=description;confirmation=action;$("confirmDialog").showModal();}
-  function placeStudent(id,index) {if(!state.students.some(s=>s.id===id)||index<0||index>=state.seats.length)return;const previous=state.seats.indexOf(id), occupant=state.seats[index];if(previous>=0)state.seats[previous]=occupant;state.seats[index]=id;selected=null;save();render();}
+  function placeStudent(id,index) {if(!state.students.some(s=>s.id===id)||index<0||index>=room.seats.length)return;const previous=room.seats.indexOf(id), occupant=room.seats[index];if(previous>=0)room.seats[previous]=occupant;room.seats[index]=id;selected=null;save();render();}
   function openList(mode="manage",index=null) {listMode=mode;targetSeat=index;$("search").value="";renderList();$("listDialog").showModal();}
   function renderList() {
     const picker=listMode==="pick";
     $("listTitle").textContent=picker?"Choisir un élève":"Élèves de la classe";
     $("listDescription").textContent=picker?positionText(targetSeat)+". Seuls les élèves non placés apparaissent ici.":"Cliquez sur la pastille pour choisir une couleur personnelle. Ces repères restent invisibles dans le PDF.";
-    const available=state.students.filter(s=>!picker||!state.seats.includes(s.id)), query=$("search").value.trim().toLocaleLowerCase("fr"), filtered=available.filter(s=>s.name.toLocaleLowerCase("fr").includes(query));
+    const available=state.students.filter(s=>!picker||!room.seats.includes(s.id)), query=$("search").value.trim().toLocaleLowerCase("fr"), filtered=available.filter(s=>s.name.toLocaleLowerCase("fr").includes(query));
     $("listCount").textContent=available.length+" élève"+(available.length>1?"s":"")+(picker?" à placer":" dans la classe");
     $("studentList").replaceChildren();
     if(!filtered.length)$("studentList").append(element("div","empty",query?"Aucun élève trouvé.":picker?"Tous les élèves sont déjà placés. Vous pouvez en ajouter.":"Votre liste est vide. Ajoutez vos premiers élèves."));
     filtered.forEach(student=>{
       const item=element(picker?"button":"div","student"+(picker?" pick":""));
       if(picker){item.type="button";item.onclick=()=>{const index=targetSeat;$("listDialog").close();placeStudent(student.id,index);};}
-      const name=element("span","student-name",student.name), index=state.seats.indexOf(student.id);
+      const name=element("span","student-name",student.name), index=room.seats.indexOf(student.id);
       name.append(element("small","",index<0?"À placer":positionText(index)));
       const avatar=element("span","avatar",initials(student.name));applyStudentColor(avatar,student);
       item.append(avatar,name);
@@ -82,7 +94,7 @@ import { connect, login, logout, persist } from "./firebase.js";
         item.append(colorPicker(student));
         const edit=element("button","icon-btn","✎"), remove=element("button","icon-btn","×");
         edit.setAttribute("aria-label","Modifier "+student.name);edit.onclick=()=>openStudentDialog(student.id);
-        remove.setAttribute("aria-label","Supprimer "+student.name);remove.onclick=()=>confirmAction("Supprimer cet élève ?","« "+student.name+" » sera retiré de la liste et du plan.",()=>{state.students=state.students.filter(s=>s.id!==student.id);state.seats=state.seats.map(id=>id===student.id?null:id);if(selected===student.id)selected=null;save();render();renderList();});
+        remove.setAttribute("aria-label","Supprimer "+student.name);remove.onclick=()=>confirmAction("Supprimer cet élève ?","« "+student.name+" » sera retiré de la liste et du plan.",()=>{state.students=state.students.filter(s=>s.id!==student.id);state.rooms.forEach(r=>{r.seats=r.seats.map(id=>id===student.id?null:id);});if(selected===student.id)selected=null;save();render();renderList();});
         item.append(edit,remove);
       }
       $("studentList").append(item);
@@ -94,7 +106,7 @@ import { connect, login, logout, persist } from "./firebase.js";
     data.classes.forEach(c=>{const option=element("option","",c.className);option.value=c.id;$("classSelect").append(option);});
     $("classSelect").value=data.active;
   }
-  function switchClass(id) {if(state)finishRename();data.active=id;state=data.classes.find(c=>c.id===id);selected=null;save();render();}
+  function switchClass(id) {if(state)finishRename();data.active=id;state=data.classes.find(c=>c.id===id);room=state?.rooms.find(r=>r.id===state.activeRoom)||null;selected=null;save();render();}
   function finishRename() {
     if(!state)return;
     state.className=$("className").value.trim().replace(/\s+/g," ").slice(0,60)||state.className||"Ma classe";
@@ -109,15 +121,48 @@ import { connect, login, logout, persist } from "./firebase.js";
       let original=c.className;
       const commit=()=>{c.className=name.value.trim().replace(/\s+/g," ").slice(0,60)||c.className;name.value=c.className;original=c.className;save();render();};
       name.onblur=commit;name.onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();name.blur();}if(e.key==="Escape"){name.value=original;name.blur();}};
-      info.append(name,element("small","",c.students.length+" élèves · "+c.rows+" rangées"+(c.id===data.active?" · Classe active":"")));
+      info.append(name,element("small","",c.students.length+" élèves · "+c.rooms.length+" salle"+(c.rooms.length>1?"s":"")+(c.id===data.active?" · Classe active":"")));
       const open=element("button","",c.id===data.active?"Ouverte":"Ouvrir");open.onclick=()=>{switchClass(c.id);$("classesDialog").close();};
       const copy=element("button","icon-btn","⧉");copy.setAttribute("aria-label","Dupliquer "+c.className);
-      copy.onclick=()=>{const ids=new Map();const students=c.students.map(s=>{const id=makeId();ids.set(s.id,id);return{...s,id};});data.classes.push({...c,id:makeId(),className:(c.className+" — copie").slice(0,60),students,seats:c.seats.map(id=>ids.get(id)||null)});save();render();renderClasses();notify("Classe dupliquée.");};
+      copy.onclick=()=>{const ids=new Map();const students=c.students.map(s=>{const id=makeId();ids.set(s.id,id);return{...s,id};});const rooms=c.rooms.map(r=>({...r,id:makeId(),seats:r.seats.map(id=>ids.get(id)||null)}));data.classes.push({...c,id:makeId(),className:(c.className+" — copie").slice(0,60),students,rooms,activeRoom:rooms[c.rooms.findIndex(r=>r.id===c.activeRoom)]?.id||rooms[0].id});save();render();renderClasses();notify("Classe dupliquée.");};
       const remove=element("button","icon-btn","×");remove.setAttribute("aria-label","Supprimer "+c.className);remove.disabled=false;
-      remove.onclick=()=>confirmAction("Supprimer "+c.className+" ?","La classe, ses élèves et son placement seront supprimés.",()=>{data.classes=data.classes.filter(x=>x.id!==c.id);if(data.active===c.id){data.active=data.classes[0]?.id||null;state=data.classes[0]||null;}selected=null;save();render();renderClasses();});
+      remove.onclick=()=>confirmAction("Supprimer "+c.className+" ?","La classe, ses élèves et son placement seront supprimés.",()=>{data.classes=data.classes.filter(x=>x.id!==c.id);if(data.active===c.id){data.active=data.classes[0]?.id||null;state=data.classes[0]||null;room=state?.rooms.find(r=>r.id===state.activeRoom)||null;}selected=null;save();render();renderClasses();});
       row.append(info,open,copy,remove);$("classList").append(row);
     });
   }
+  function renderRoomSelect() {
+    $("roomSelect").replaceChildren();
+    state.rooms.forEach(r=>{const option=element("option","",r.name);option.value=r.id;$("roomSelect").append(option);});
+    $("roomSelect").value=state.activeRoom;
+  }
+  function switchRoom(id) {
+    const next=state.rooms.find(r=>r.id===id);if(!next)return;
+    state.activeRoom=id;room=next;selected=null;save();render();
+  }
+  function renderRooms() {
+    $("roomsTitle").textContent="Salles de "+state.className;
+    $("roomList").replaceChildren();
+    state.rooms.forEach(r=>{
+      const row=element("div","class-row"+(r.id===state.activeRoom?" current":""));
+      const info=element("div","class-info"),name=element("input","class-row-name");
+      name.value=r.name;name.maxLength=60;name.setAttribute("aria-label","Nom de la salle "+r.name);
+      let original=r.name;
+      name.onblur=()=>{r.name=name.value.trim().replace(/\s+/g," ").slice(0,60)||r.name;name.value=r.name;original=r.name;save();render();};
+      name.onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();name.blur();}if(e.key==="Escape"){name.value=original;name.blur();}};
+      info.append(name,element("small","",r.rows+" rangées · "+r.columns+" tables par rangée · "+r.seats.filter(Boolean).length+" élèves placés"));
+      const open=element("button","",r.id===state.activeRoom?"Ouverte":"Ouvrir");open.onclick=()=>{switchRoom(r.id);$("roomsDialog").close();};
+      const copy=element("button","icon-btn","⧉");copy.setAttribute("aria-label","Dupliquer "+r.name);
+      copy.onclick=()=>{state.rooms.push({...r,id:makeId(),name:(r.name+" — copie").slice(0,60),seats:[...r.seats]});save();render();renderRooms();notify("Salle dupliquée.");};
+      const remove=element("button","icon-btn","×");remove.setAttribute("aria-label","Supprimer la salle "+r.name);remove.disabled=state.rooms.length===1;
+      remove.onclick=()=>confirmAction("Supprimer "+r.name+" ?","Seuls cette salle et son placement seront supprimés. La liste des élèves sera conservée.",()=>{state.rooms=state.rooms.filter(x=>x.id!==r.id);if(state.activeRoom===r.id){state.activeRoom=state.rooms[0].id;room=state.rooms[0];}selected=null;save();render();renderRooms();});
+      row.append(info,open,copy,remove);$("roomList").append(row);
+    });
+  }
+  $("roomSelect").onchange=()=>switchRoom($("roomSelect").value);
+  $("manageRooms").onclick=()=>{renderRooms();$("roomsDialog").showModal();};
+  $("closeRooms").onclick=()=>$("roomsDialog").close();
+  $("newRoomForm").onsubmit=e=>{e.preventDefault();const name=$("newRoomName").value.trim().replace(/\s+/g," ");if(!name){$("newRoomName").setCustomValidity("Saisissez le nom de la salle.");$("newRoomName").reportValidity();return;}const created=makeRoom(name.slice(0,60));state.rooms.push(created);switchRoom(created.id);$("newRoomName").value="";$("roomsDialog").close();};
+  $("newRoomName").oninput=()=>$("newRoomName").setCustomValidity("");
   function render() {
     renderClassSelect();
     $("planPanel").hidden=!ready||!state;
@@ -125,20 +170,21 @@ import { connect, login, logout, persist } from "./firebase.js";
     $("classSelect").disabled=!ready||!state;
     $("manageClasses").disabled=!ready;
     if(!state)return;
-    $("rows").value=state.rows;$("columns").value=state.columns;$("studentNumber").value=state.students.length;
+    renderRoomSelect();
+    $("rows").value=room.rows;$("columns").value=room.columns;$("studentNumber").value=state.students.length;
     if(document.activeElement!==$("className"))$("className").value=state.className||"Ma classe";
-    const placed=state.seats.filter(Boolean).length, shortage=Math.max(0,state.students.length-state.seats.length);
+    const placed=room.seats.filter(Boolean).length, shortage=Math.max(0,state.students.length-room.seats.length);
     $("stats").textContent=state.students.length+" élèves · "+placed+" placés · "+(state.students.length-placed)+" à placer";
-    $("capacity").textContent=state.rows*state.columns+" tables · "+state.seats.length+" places";$("freeCount").textContent=(state.seats.length-placed)+" places libres";
+    $("capacity").textContent=room.rows*room.columns+" tables · "+room.seats.length+" places";$("freeCount").textContent=(room.seats.length-placed)+" places libres";
     $("notice").hidden=!shortage;$("notice").textContent="Il manque "+shortage+" place"+(shortage>1?"s":"")+" pour accueillir toute la classe. Augmentez les rangées ou les tables par rangée.";
     $("shuffle").disabled=!state.students.length;$("clear").disabled=!placed;
     const pupil=state.students.find(s=>s.id===selected);$("selectionBar").hidden=!pupil;if(pupil)$("selectionText").textContent=pupil.name+" — cliquez sur un autre élève pour échanger leurs places.";
-    $("room").style.minWidth=Math.max(340,state.columns*175+50)+"px";$("desks").style.gridTemplateColumns="repeat("+state.columns+",minmax(0,1fr))";$("desks").replaceChildren();
-    for(let table=0;table<state.rows*state.columns;table++){
+    $("room").style.minWidth=Math.max(340,room.columns*175+50)+"px";$("desks").style.gridTemplateColumns="repeat("+room.columns+",minmax(0,1fr))";$("desks").replaceChildren();
+    for(let table=0;table<room.rows*room.columns;table++){
       const desk=element("div","desk");
       for(let side=0;side<2;side++){
-        const index=table*2+side, student=state.students.find(s=>s.id===state.seats[index]), seat=element("button","seat"+(student?" occupied":"")+(student&&selected===student.id?" active":""));
-        seat.type="button";seat.setAttribute("aria-label",positionText(index)+(student?", "+student.name:", choisir un élève"));seat.append(element("span","seat-number",index%(state.columns*2)+1));
+        const index=table*2+side, student=state.students.find(s=>s.id===room.seats[index]), seat=element("button","seat"+(student?" occupied":"")+(student&&selected===student.id?" active":""));
+        seat.type="button";seat.setAttribute("aria-label",positionText(index)+(student?", "+student.name:", choisir un élève"));seat.append(element("span","seat-number",index%(room.columns*2)+1));
         if(student){applyStudentColor(seat,student);seat.append(element("span","initial",initials(student.name)),element("span","seat-name",student.name));seat.draggable=true;seat.ondragstart=e=>{e.dataTransfer.setData("text/plain",student.id);e.dataTransfer.effectAllowed="move";};seat.ondragend=()=>document.querySelectorAll(".drag-over").forEach(el=>el.classList.remove("drag-over"));}
         else seat.append(element("span","plus","＋"),element("span","empty-label","Choisir un élève"));
         seat.onclick=()=>{if(!student){selected=null;render();openList("pick",index);}else if(selected&&selected!==student.id)placeStudent(selected,index);else{selected=selected===student.id?null:student.id;render();}};
@@ -151,8 +197,8 @@ import { connect, login, logout, persist } from "./firebase.js";
   function resizeRoom() {
     if(!$("rows").checkValidity()||!$("columns").checkValidity()){$("rows").reportValidity();$("columns").reportValidity();render();return;}
     const rows=Number($("rows").value), columns=Number($("columns").value), nextSeats=Array(rows*columns*2).fill(null);let displaced=0;
-    for(let row=0;row<state.rows;row++)for(let table=0;table<state.columns;table++)for(let side=0;side<2;side++){const id=state.seats[(row*state.columns+table)*2+side];if(!id)continue;if(row<rows&&table<columns)nextSeats[(row*columns+table)*2+side]=id;else displaced++;}
-    const apply=()=>{state.rows=rows;state.columns=columns;state.seats=nextSeats;selected=null;save();render();};
+    for(let row=0;row<room.rows;row++)for(let table=0;table<room.columns;table++)for(let side=0;side<2;side++){const id=room.seats[(row*room.columns+table)*2+side];if(!id)continue;if(row<rows&&table<columns)nextSeats[(row*columns+table)*2+side]=id;else displaced++;}
+    const apply=()=>{room.rows=rows;room.columns=columns;room.seats=nextSeats;selected=null;save();render();};
     if(displaced){render();confirmAction("Réduire le nombre de tables ?",displaced+" élève"+(displaced>1?"s retourneront":" retournera")+" dans la liste des élèves non placés. Leurs noms seront conservés.",apply);}else apply();
   }
   function resizeStudents() {
@@ -160,9 +206,9 @@ import { connect, login, logout, persist } from "./firebase.js";
     const count=Number(field.value);if(count===state.students.length)return;
     if(count>state.students.length){let number=1;const used=new Set(state.students.map(s=>s.name));while(state.students.length<count){while(used.has("Élève "+number))number++;const name="Élève "+number++;used.add(name);state.students.push({id:makeId(),name});}save();render();notify("Élèves ajoutés. Modifiez leurs noms dans « Gérer les élèves ».");return;}
     const removed=state.students.slice(count);render();
-    confirmAction("Réduire la liste à "+count+" élèves ?","Les "+removed.length+" derniers élèves seront supprimés : "+removed.slice(0,4).map(s=>s.name).join(", ")+(removed.length>4?", …":".")+" Vous pouvez aussi les supprimer individuellement.",()=>{const ids=new Set(removed.map(s=>s.id));state.students=state.students.slice(0,count);state.seats=state.seats.map(id=>ids.has(id)?null:id);if(ids.has(selected))selected=null;save();render();});
+    confirmAction("Réduire la liste à "+count+" élèves ?","Les "+removed.length+" derniers élèves seront supprimés : "+removed.slice(0,4).map(s=>s.name).join(", ")+(removed.length>4?", …":".")+" Vous pouvez aussi les supprimer individuellement.",()=>{const ids=new Set(removed.map(s=>s.id));state.students=state.students.slice(0,count);state.rooms.forEach(r=>{r.seats=r.seats.map(id=>ids.has(id)?null:id);});if(ids.has(selected))selected=null;save();render();});
   }
-  $("exportPdf").onclick=()=>{if(!state)return;finishRename();try{downloadClassPdf(state);}catch(error){notify("Impossible de générer le PDF : "+error.message);}};
+  $("exportPdf").onclick=()=>{if(!state)return;finishRename();try{downloadClassPdf({...room,students:state.students,className:state.className+" — "+room.name});}catch(error){notify("Impossible de générer le PDF : "+error.message);}};
   $("rows").onchange=resizeRoom;$("columns").onchange=resizeRoom;$("studentNumber").onchange=resizeStudents;
   $("manageStudents").onclick=()=>openList();$("closeList").onclick=()=>$("listDialog").close();$("addButton").onclick=()=>openStudentDialog();$("search").oninput=renderList;
   $("closeStudentDialog").onclick=()=>$("studentDialog").close();
@@ -178,9 +224,9 @@ import { connect, login, logout, persist } from "./firebase.js";
   $("newClassForm").onsubmit=e=>{e.preventDefault();const name=$("newClassName").value.trim().replace(/\s+/g," ");if(!name){$("newClassName").setCustomValidity("Saisissez le nom de la classe.");$("newClassName").reportValidity();return;}const created=makeClass(name.slice(0,60),0);data.classes.push(created);switchClass(created.id);$("newClassName").value="";$("classesDialog").close();};
   $("newClassName").oninput=()=>$("newClassName").setCustomValidity("");
   $("studentForm").onsubmit=e=>{e.preventDefault();const names=$("names").value.split(/\r?\n/).map(n=>n.trim()).filter(Boolean);if(!names.length){$("names").setCustomValidity("Saisissez au moins un nom.");$("names").reportValidity();return;}if(!editing&&state.students.length+names.length>200){$("names").setCustomValidity("La classe peut contenir au maximum 200 élèves.");$("names").reportValidity();return;}if(editing){const student=state.students.find(s=>s.id===editing);if(student)student.name=names.join(" ");}else state.students.push(...names.map(name=>({id:makeId(),name})));save();render();$("studentDialog").close();};
-  $("names").oninput=()=>$("names").setCustomValidity("");$("cancelSelection").onclick=()=>{selected=null;render();};$("unplace").onclick=()=>{state.seats=state.seats.map(id=>id===selected?null:id);selected=null;save();render();};
-  $("shuffle").onclick=()=>{const apply=()=>{const ids=state.students.map(s=>s.id);for(let i=ids.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[ids[i],ids[j]]=[ids[j],ids[i]];}state.seats=Array.from({length:state.rows*state.columns*2},(_,i)=>ids[i]||null);selected=null;save();render();};if(state.seats.some(Boolean))confirmAction("Redistribuer les places ?","Les élèves seront répartis au hasard. Les élèves restants apparaîtront dans la liste des non placés.",apply);else apply();};
-  $("clear").onclick=()=>confirmAction("Libérer toutes les places ?","Les élèves resteront dans votre liste.",()=>{state.seats.fill(null);selected=null;save();render();});
+  $("names").oninput=()=>$("names").setCustomValidity("");$("cancelSelection").onclick=()=>{selected=null;render();};$("unplace").onclick=()=>{room.seats=room.seats.map(id=>id===selected?null:id);selected=null;save();render();};
+  $("shuffle").onclick=()=>{const apply=()=>{const ids=state.students.map(s=>s.id);for(let i=ids.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[ids[i],ids[j]]=[ids[j],ids[i]];}room.seats=Array.from({length:room.rows*room.columns*2},(_,i)=>ids[i]||null);selected=null;save();render();};if(room.seats.some(Boolean))confirmAction("Redistribuer les places ?","Les élèves seront répartis au hasard. Les élèves restants apparaîtront dans la liste des non placés.",apply);else apply();};
+  $("clear").onclick=()=>confirmAction("Libérer toutes les places ?","Les élèves resteront dans votre liste.",()=>{room.seats.fill(null);selected=null;save();render();});
   $("cancelConfirm").onclick=()=>{confirmation=null;$("confirmDialog").close();};$("acceptConfirm").onclick=()=>{const action=confirmation;confirmation=null;$("confirmDialog").close();if(action)action();};$("confirmDialog").addEventListener("cancel",()=>confirmation=null);
   $("createFirstClass").onclick=()=>{$("classesDialog").showModal();renderClasses();$("newClassName").focus();};
   $("loginButton").onclick=async()=>{
@@ -191,7 +237,7 @@ import { connect, login, logout, persist } from "./firebase.js";
   $("logoutButton").onclick=async()=>{try{await logout();}catch(error){notify(error.message);}};
   $("trustedDevice").checked=connect(remote=>{
     if(!remote){
-      ready=false;data={classes:[],active:null};state=null;selected=null;returnToList=false;
+      ready=false;data={classes:[],active:null};state=null;room=null;selected=null;returnToList=false;
       document.querySelectorAll("dialog[open]").forEach(d=>d.close());
       render();return;
     }
@@ -200,9 +246,11 @@ import { connect, login, logout, persist } from "./firebase.js";
       const active=remote.active||data.active;
       data={classes,active:classes.some(c=>c.id===active)?active:classes[0]?.id||null};
       state=classes.find(c=>c.id===data.active)||null;
+      room=state?.rooms.find(r=>r.id===state.activeRoom)||null;
       if(!state?.students.some(s=>s.id===selected))selected=null;
       ready=true;render();
       if($("classesDialog").open)renderClasses();
+      if($("roomsDialog").open&&state)renderRooms();
       if($("listDialog").open&&state)renderList();
     }catch(error){$("authMessage").textContent="Impossible de charger les classes : "+error.message;}
   },status=>{
