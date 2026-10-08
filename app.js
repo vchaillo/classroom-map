@@ -1,5 +1,46 @@
 import { downloadClassPdf } from "./export-pdf.js";
 import { connect, login, logout, persist } from "./firebase.js";
+// Adjacent seats share an edge: immediate horizontal or vertical neighbours.
+function generatePlacement(students, rows, columns, random=Math.random) {
+  const width=columns*2,capacity=rows*width;
+  const shuffle=items=>items.map(value=>({value,key:random()})).sort((a,b)=>a.key-b.key).map(x=>x.value);
+  const front=students.filter(s=>s.frontRow);
+  if(front.length>width)return {error:"Il y a plus d’élèves prioritaires que de places au premier rang."};
+  const chosen=[...shuffle(front),...shuffle(students.filter(s=>!s.frontRow))].slice(0,capacity);
+  const seats=Array(capacity).fill(null),byId=new Map(chosen.map(s=>[s.id,s]));
+  const distance=(a,b)=>Math.hypot(Math.floor(a/width)-Math.floor(b/width),a%width-b%width);
+  const neighbours=i=>[i%width?i-1:-1,i%width<width-1?i+1:-1,i-width,i+width].filter(j=>j>=0&&j<capacity);
+  const valid=(student,i)=>!student.frontRow||i<width;
+  const allowed=(student,i)=>valid(student,i)&&(!student.color||neighbours(i).every(j=>byId.get(seats[j])?.color!==student.color));
+  const frequency=new Map();chosen.forEach(s=>{if(s.color)frequency.set(s.color,(frequency.get(s.color)||0)+1);});
+  for(const [color,count] of frequency){
+    if(count>Math.ceil(capacity/2)||front.filter(s=>s.color===color).length>Math.ceil(width/2))return {error:"Trop d’élèves de même couleur pour éviter les voisins directs avec cette disposition."};
+  }
+  const ordered=shuffle(chosen).sort((a,b)=>Number(!!b.frontRow)-Number(!!a.frontRow)||(frequency.get(b.color)||0)-(frequency.get(a.color)||0));
+  let nodes=0;
+  function search(depth) {
+    if(depth===ordered.length)return true;
+    if(++nodes>60000)return false;
+    const student=ordered[depth];
+    const candidates=shuffle(seats.map((id,i)=>i).filter(i=>!seats[i]&&allowed(student,i)));
+    const separation=i=>{let closest=capacity;seats.forEach((id,j)=>{if(student.color&&byId.get(id)?.color===student.color)closest=Math.min(closest,distance(i,j));});return closest;};
+    candidates.sort((a,b)=>separation(b)-separation(a));
+    for(const i of candidates){seats[i]=student.id;if(search(depth+1))return true;seats[i]=null;if(nodes>60000)break;}
+    return false;
+  }
+  if(!search(0))return {error:"Aucun placement respectant les contraintes n’a été trouvé. Ajoutez des places ou ajustez les couleurs et les priorités, puis réessayez."};
+  // Improve separation while retaining both hard constraints.
+  const score=()=>{let total=0;for(let i=0;i<capacity;i++){const color=byId.get(seats[i])?.color;if(!color)continue;for(let j=i+1;j<capacity;j++)if(byId.get(seats[j])?.color===color)total+=1/(distance(i,j)**2);}return total;};
+  let best=score();
+  for(let attempt=0;attempt<1200;attempt++){
+    const a=Math.floor(random()*capacity),b=Math.floor(random()*capacity);if(a===b)continue;
+    [seats[a],seats[b]]=[seats[b],seats[a]];
+    const sa=byId.get(seats[a]),sb=byId.get(seats[b]);
+    if((!sa||allowed(sa,a))&&(!sb||allowed(sb,b))){const next=score();if(next<=best){best=next;continue;}}
+    [seats[a],seats[b]]=[seats[b],seats[a]];
+  }
+  return {seats,unplaced:students.length-chosen.length};
+}
 (() => {
   "use strict";
   const $ = id => document.getElementById(id);
@@ -51,7 +92,7 @@ import { connect, login, logout, persist } from "./firebase.js";
   function normalizeClass(saved) {
     if(!saved || !Array.isArray(saved.students))throw new Error("Invalid saved class");
     const studentIds=new Set();
-    const students=saved.students.filter(s=>s && typeof s.id==="string" && typeof s.name==="string" && !studentIds.has(s.id) && (studentIds.add(s.id),true)).slice(0,200).map(s=>({...s,color:studentColors.some(c=>c.id===s.color)?s.color:""}));
+    const students=saved.students.filter(s=>s && typeof s.id==="string" && typeof s.name==="string" && !studentIds.has(s.id) && (studentIds.add(s.id),true)).slice(0,200).map(s=>({...s,frontRow:s.frontRow===true,color:studentColors.some(c=>c.id===s.color)?s.color:""}));
     // Migrate the original single-room plan without changing its placement.
     const sources=Array.isArray(saved.rooms)&&saved.rooms.length?saved.rooms:[{id:"legacy-room",name:"Salle 1",rows:saved.rows,columns:saved.columns,seats:saved.seats}];
     const roomIds=new Set();
@@ -77,7 +118,7 @@ import { connect, login, logout, persist } from "./firebase.js";
   function renderList() {
     const picker=listMode==="pick";
     $("listTitle").textContent=picker?"Choisir un élève":"Élèves de la classe";
-    $("listDescription").textContent=picker?positionText(targetSeat)+". Seuls les élèves non placés apparaissent ici.":"Cliquez sur la pastille pour choisir une couleur personnelle. Ces repères restent invisibles dans le PDF.";
+    $("listDescription").textContent=picker?positionText(targetSeat)+". Seuls les élèves non placés apparaissent ici.":"Cliquez sur la pastille pour choisir une couleur personnelle. La flèche ↑ active la priorité au premier rang. Ces repères restent invisibles dans le PDF.";
     const available=state.students.filter(s=>!picker||!room.seats.includes(s.id)), query=$("search").value.trim().toLocaleLowerCase("fr"), filtered=available.filter(s=>s.name.toLocaleLowerCase("fr").includes(query));
     $("listCount").textContent=available.length+" élève"+(available.length>1?"s":"")+(picker?" à placer":" dans la classe");
     $("studentList").replaceChildren();
@@ -92,6 +133,10 @@ import { connect, login, logout, persist } from "./firebase.js";
       if(picker)item.append(element("span","","＋"));
       else {
         item.append(colorPicker(student));
+        const priority=element("button","front-row-toggle"+(student.frontRow?" enabled":""),"↑");
+        priority.type="button";priority.title="Placer au premier rang lors de la répartition automatique";
+        priority.setAttribute("aria-label","Premier rang pour "+student.name);priority.setAttribute("aria-pressed",String(!!student.frontRow));
+        priority.onclick=()=>{student.frontRow=!student.frontRow;save();renderList();};item.append(priority);
         const edit=element("button","icon-btn","✎"), remove=element("button","icon-btn","×");
         edit.setAttribute("aria-label","Modifier "+student.name);edit.onclick=()=>openStudentDialog(student.id);
         remove.setAttribute("aria-label","Supprimer "+student.name);remove.onclick=()=>confirmAction("Supprimer cet élève ?","« "+student.name+" » sera retiré de la liste et du plan.",()=>{state.students=state.students.filter(s=>s.id!==student.id);state.rooms.forEach(r=>{r.seats=r.seats.map(id=>id===student.id?null:id);});if(selected===student.id)selected=null;save();render();renderList();});
@@ -225,7 +270,7 @@ import { connect, login, logout, persist } from "./firebase.js";
   $("newClassName").oninput=()=>$("newClassName").setCustomValidity("");
   $("studentForm").onsubmit=e=>{e.preventDefault();const names=$("names").value.split(/\r?\n/).map(n=>n.trim()).filter(Boolean);if(!names.length){$("names").setCustomValidity("Saisissez au moins un nom.");$("names").reportValidity();return;}if(!editing&&state.students.length+names.length>200){$("names").setCustomValidity("La classe peut contenir au maximum 200 élèves.");$("names").reportValidity();return;}if(editing){const student=state.students.find(s=>s.id===editing);if(student)student.name=names.join(" ");}else state.students.push(...names.map(name=>({id:makeId(),name})));save();render();$("studentDialog").close();};
   $("names").oninput=()=>$("names").setCustomValidity("");$("cancelSelection").onclick=()=>{selected=null;render();};$("unplace").onclick=()=>{room.seats=room.seats.map(id=>id===selected?null:id);selected=null;save();render();};
-  $("shuffle").onclick=()=>{const apply=()=>{const ids=state.students.map(s=>s.id);for(let i=ids.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[ids[i],ids[j]]=[ids[j],ids[i]];}room.seats=Array.from({length:room.rows*room.columns*2},(_,i)=>ids[i]||null);selected=null;save();render();};if(room.seats.some(Boolean))confirmAction("Redistribuer les places ?","Les élèves seront répartis au hasard. Les élèves restants apparaîtront dans la liste des non placés.",apply);else apply();};
+  $("shuffle").onclick=()=>{const apply=()=>{const result=generatePlacement(state.students,room.rows,room.columns);if(result.error){confirmAction("Placement non modifié",result.error,()=>{});return;}room.seats=result.seats;selected=null;save();render();notify(result.unplaced?result.unplaced+" élèves restent à placer : il manque des places.":"Placement effectué : couleurs séparées et premier rang respecté.");};if(room.seats.some(Boolean))confirmAction("Redistribuer les places ?","Les priorités de premier rang et la séparation des couleurs seront respectées. Le plan actuel sera conservé si aucun placement n’est trouvé.",apply);else apply();};
   $("clear").onclick=()=>confirmAction("Libérer toutes les places ?","Les élèves resteront dans votre liste.",()=>{room.seats.fill(null);selected=null;save();render();});
   $("cancelConfirm").onclick=()=>{confirmation=null;$("confirmDialog").close();};$("acceptConfirm").onclick=()=>{const action=confirmation;confirmation=null;$("confirmDialog").close();if(action)action();};$("confirmDialog").addEventListener("cancel",()=>confirmation=null);
   $("createFirstClass").onclick=()=>{$("classesDialog").showModal();renderClasses();$("newClassName").focus();};
@@ -262,6 +307,15 @@ import { connect, login, logout, persist } from "./firebase.js";
     const text=status.error?"Erreur de synchronisation : "+status.error.message:status.offline?(status.pending?"Hors ligne · modifications en attente":"Hors ligne · données en cache"):status.pending?"Synchronisation en cours…":status.fromCache?"Données en cache · connexion au serveur…":ready?"Données synchronisées":"Chargement des classes…";
     $("syncStatus").textContent=text;$("saveStatus").textContent=text;
     if(status.error){$("authMessage").textContent=text;notify(text);}
+  });
+  // Require both ends of the pointer gesture to be outside the dialog.
+  document.querySelectorAll("dialog").forEach(dialog=>{
+    let outside=false;
+    const isOutside=e=>{const r=dialog.getBoundingClientRect();return e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom;};
+    dialog.addEventListener("pointerdown",e=>{outside=e.target===dialog&&isOutside(e);});
+    dialog.addEventListener("click",e=>{if(outside&&e.target===dialog&&isOutside(e)){if(dialog.id==="studentDialog")returnToList=false;dialog.close();}outside=false;});
+    dialog.addEventListener("cancel",()=>{if(dialog.id==="studentDialog")returnToList=false;});
+    dialog.addEventListener("close",()=>{if(dialog.id==="confirmDialog")confirmation=null;});
   });
   render();
 })();
