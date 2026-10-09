@@ -6,15 +6,22 @@
   <meta name="description" content="Organisez votre plan de classe : élèves, tables et placement personnalisables.">
   <title>Classroom Map — Plan de classe</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Ctext%20x%3D%2232%22%20y%3D%2250%22%20text-anchor%3D%22middle%22%20font-size%3D%2252%22%3E%F0%9F%A7%91%E2%80%8D%F0%9F%8F%AB%3C%2Ftext%3E%3C%2Fsvg%3E">
-  <link rel="stylesheet" href="styles.css?v=placement-1">
-  <script src="app.js?v=placement-1" type="module"></script>
+  <link rel="stylesheet" href="styles.css?v=profile-1">
+  <script src="app.js?v=profile-1" type="module"></script>
 </head>
 <body>
-<header><div><h1>▦ Classroom Map</h1><p>Votre plan de classe, simplement.</p></div><div id="classControls" class="class-switcher" hidden><select id="classSelect" aria-label="Classe active"></select><button id="manageClasses">Gérer les classes</button></div><div id="accountControls" class="account-controls" hidden><span id="accountName"></span><button id="logoutButton">Se déconnecter</button></div></header>
+<header><div><h1>▦ Classroom Map</h1><p>Votre plan de classe, simplement.</p></div><div id="classControls" class="class-switcher" hidden><select id="classSelect" aria-label="Classe active"></select><button id="manageClasses">Gérer les classes</button></div><div id="accountControls" class="account-controls" hidden><a id="accountName" href="#profile" title="Voir mon profil"></a><button id="logoutButton">Se déconnecter</button></div></header>
 <main>
 <section id="authPanel" class="panel welcome"><h2>Votre plan de classe, partout.</h2><p>Connectez-vous pour créer vos classes et retrouver vos élèves et leurs placements.</p><label class="trusted"><input id="trustedDevice" type="checkbox"> Appareil personnel : rester connecté et conserver les données hors ligne</label><p class="help">Sur un appareil partagé, laissez cette option décochée. Les modifications hors ligne restent disponibles tant que cette page est ouverte.</p><button id="loginButton" class="primary">Se connecter avec Google</button><p id="authMessage" role="status"></p></section>
 <p id="syncStatus" role="status" aria-live="polite">Connexion en cours…</p>
 <section id="emptyPanel" class="panel welcome" hidden><h2>Bienvenue dans Classroom Map</h2><p>Votre espace est vide. Créez une classe, ajoutez vos élèves, puis organisez leur placement.</p><button id="createFirstClass" class="primary">Créer ma première classe</button></section>
+<section id="profilePanel" class="panel profile-panel" hidden aria-labelledby="profileTitle">
+<a class="profile-back" href="#plan">← Retour au plan de classe</a>
+<h2 id="profileTitle">Mon profil professeur</h2><p class="profile-intro">Votre compte et vos classes, en un coup d’œil.</p>
+<div class="profile-account"><div id="profileName" class="profile-name"></div><dl><div><dt>Adresse e-mail</dt><dd id="profileEmail"></dd></div><div><dt>Connexion</dt><dd>Compte Google</dd></div><div><dt>Compte créé le</dt><dd id="profileCreated"></dd></div></dl></div>
+<div class="profile-stats"><div><strong id="profileClasses">0</strong><span>Classes</span></div><div><strong id="profileRooms">0</strong><span>Salles dans vos classes</span></div><div><strong id="profileStudents">0</strong><span>Élèves inscrits dans vos classes</span></div></div>
+<h3>Mes classes</h3><div id="profileSummary"></div>
+</section>
 <section id="planPanel" hidden class="panel" aria-label="Plan de classe">
   <div class="toolbar"><div><div class="class-title"><input id="className" class="class-name" aria-label="Nom de la classe" maxlength="60" title="Cliquez pour renommer la classe"><button id="renameClass" class="icon-btn" aria-label="Renommer la classe">✎</button></div><div class="room-controls"><label for="roomSelect">Salle</label><select id="roomSelect" aria-label="Salle active"></select><button id="manageRooms">Gérer les salles</button></div><p id="stats"></p></div><div class="tools"><button id="exportPdf" class="export-pdf" title="Télécharger le plan sur une page en paysage">↓ Exporter en PDF</button><button id="manageStudents" class="primary">Gérer les élèves</button><button id="shuffle">Répartir au hasard</button><button id="clear">Libérer les places</button></div></div>
   <div class="settings"><div class="fields"><label>Rangées <input id="rows" type="number" min="1" max="12" step="1"></label><label>Tables par rangée <input id="columns" type="number" min="1" max="8" step="1"></label><label>Élèves <input id="studentNumber" type="number" min="0" max="200" step="1"></label></div><span id="capacity"></span></div>
