@@ -1,8 +1,8 @@
-import { downloadClassPdf } from "./export-pdf.js?v=final-theme-1";
+import { downloadClassPdf } from "./export-pdf.js?v=layout-1";
 import { connect, login, logout, persist } from "./firebase.js?v=appearance-1";
 // Adjacent seats share an edge: immediate horizontal or vertical neighbours.
 function generatePlacement(students, rows, columns, random=Math.random) {
-  const width=columns*2,capacity=rows*width;
+  const width=Array.isArray(columns)?columns.reduce((a,b)=>a+b,0):columns*2,capacity=rows*width;
   const shuffle=items=>items.map(value=>({value,key:random()})).sort((a,b)=>a.key-b.key).map(x=>x.value);
   const front=students.filter(s=>s.frontRow);
   if(front.length>width)return {error:"Il y a plus d’élèves prioritaires que de places au premier rang."};
@@ -105,7 +105,7 @@ function generatePlacement(students, rows, columns, random=Math.random) {
   let serial = 0;
   const makeId = () => Date.now().toString(36) + "-" + (++serial) + "-" + Math.random().toString(36).slice(2,8);
   function makeRoom(name="Salle 1") {
-    return {id:makeId(),name,rows:5,columns:4,seats:Array(40).fill(null)};
+    return {id:makeId(),name,rows:5,columns:4,tableSizes:[2,2,2,2],seats:Array(40).fill(null)};
   }
   function makeClass(className) {
     const first=makeRoom();
@@ -121,9 +121,10 @@ function generatePlacement(students, rows, columns, random=Math.random) {
     const rooms=sources.map(r=>{
       if(!r || !Array.isArray(r.seats) || !Number.isInteger(r.rows) || r.rows<1 || r.rows>12 || !Number.isInteger(r.columns) || r.columns<1 || r.columns>8)throw new Error("Invalid saved room");
       const id=typeof r.id==="string"&&!roomIds.has(r.id)?r.id:makeId();roomIds.add(id);
+      const tableSizes=Array.from({length:r.columns},(_,i)=>[1,2,3].includes(r.tableSizes?.[i])?r.tableSizes[i]:2);
       const seen=new Set();
-      const seats=Array.from({length:r.rows*r.columns*2},(_,i)=>{const pupil=r.seats[i];if(!studentIds.has(pupil)||seen.has(pupil)||!students.some(s=>s.id===pupil))return null;seen.add(pupil);return pupil;});
-      return {id,name:typeof r.name==="string"&&r.name.trim()?r.name.slice(0,60):"Salle",rows:r.rows,columns:r.columns,seats};
+      const seats=Array.from({length:r.rows*tableSizes.reduce((a,b)=>a+b,0)},(_,i)=>{const pupil=r.seats[i];if(!studentIds.has(pupil)||seen.has(pupil)||!students.some(s=>s.id===pupil))return null;seen.add(pupil);return pupil;});
+      return {id,name:typeof r.name==="string"&&r.name.trim()?r.name.slice(0,60):"Salle",rows:r.rows,columns:r.columns,tableSizes,seats};
     });
     return {id:typeof saved.id==="string"?saved.id:makeId(),className:typeof saved.className==="string"&&saved.className.trim()?saved.className.slice(0,60):"Ma classe",students,rooms,activeRoom:rooms.some(r=>r.id===saved.activeRoom)?saved.activeRoom:rooms[0].id};
   }
@@ -131,7 +132,9 @@ function generatePlacement(students, rows, columns, random=Math.random) {
   let data={classes:[],active:null,preferences:normalizePreferences()}, state=null, room=null, ready=false;
   let selected=null, editing=null, targetSeat=null, listMode="manage", returnToList=false, confirmation=null, toastTimer;
   const initials = name => name.trim().split(/\s+/).slice(0,2).map(p=>p[0]).join("").toUpperCase();
-  const positionText = index => "Rangée "+(Math.floor(index/(room.columns*2))+1)+" · place "+(index%(room.columns*2)+1);
+  const rowWidth = r => r.tableSizes.reduce((a,b)=>a+b,0);
+  const tableOffset = (sizes,column) => sizes.slice(0,column).reduce((a,b)=>a+b,0);
+  const positionText = index => "Rangée "+(Math.floor(index/(rowWidth(room)))+1)+" · place "+(index%(rowWidth(room))+1);
   function element(tag, className, text) {const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;}
   function notify(message) {$("toast").textContent=message;$("toast").hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$("toast").hidden=true,3200);}
   function save() { if(ready) persist(data); }
@@ -232,12 +235,17 @@ function generatePlacement(students, rows, columns, random=Math.random) {
   $("closeRooms").onclick=()=>$("roomsDialog").close();
   $("newRoomForm").onsubmit=e=>{e.preventDefault();const name=$("newRoomName").value.trim().replace(/\s+/g," ");if(!name){$("newRoomName").setCustomValidity("Saisissez le nom de la salle.");$("newRoomName").reportValidity();return;}const created=makeRoom(name.slice(0,60));state.rooms.push(created);switchRoom(created.id);$("newRoomName").value="";$("roomsDialog").close();};
   $("newRoomName").oninput=()=>$("newRoomName").setCustomValidity("");
+  function renderAvatar(container,user) {
+    container.replaceChildren();
+    const fallback=element("span","avatar-initials",initials(user?.displayName||user?.email||"Professeur"));container.append(fallback);
+    if(user?.photoURL){try{const url=new URL(user.photoURL);if(url.protocol!=="https:")return;const image=element("img");image.alt="";image.referrerPolicy="no-referrer";image.onload=()=>{fallback.hidden=true;};image.onerror=()=>image.remove();image.src=url.href;container.append(image);}catch{}}
+  }
   function renderProfile() {
     const profile=location.hash.startsWith("#profile")&&!!currentUser;
     $("profilePanel").hidden=!profile;
     $("planPanel").hidden=profile||!ready||!state;
     $("emptyPanel").hidden=profile||!ready||!!state;
-    $("profileName").textContent=currentUser?.displayName||"Professeur";
+    $("profileName").textContent=currentUser?.displayName||"Professeur";renderAvatar($("profileAvatar"),currentUser);
     $("profileEmail").textContent=currentUser?.email||"Non renseignée";
     const created=currentUser?.metadata?.creationTime;
     $("profileCreated").textContent=created&&!Number.isNaN(Date.parse(created))?new Intl.DateTimeFormat("fr-FR",{dateStyle:"long"}).format(new Date(created)):"Non disponible";
@@ -265,6 +273,12 @@ function generatePlacement(students, rows, columns, random=Math.random) {
     if(!state)return;
     renderRoomSelect();
     $("rows").value=room.rows;$("columns").value=room.columns;$("studentNumber").value=state.students.length;
+    $("tableSizes").replaceChildren();
+    room.tableSizes.forEach((size,column)=>{
+      const label=element("label","","Table "+(column+1)),select=element("select");select.setAttribute("aria-label","Places par table, colonne "+(column+1));
+      [1,2,3].forEach(n=>{const option=element("option","",n+" place"+(n>1?"s":""));option.value=n;select.append(option);});select.value=size;
+      select.onchange=()=>{const sizes=[...room.tableSizes];sizes[column]=Number(select.value);resizeRoom(sizes);};label.append(select);$("tableSizes").append(label);
+    });
     if(document.activeElement!==$("className"))$("className").value=state.className||"Ma classe";
     const placed=room.seats.filter(Boolean).length, shortage=Math.max(0,state.students.length-room.seats.length);
     $("stats").textContent=state.students.length+" élèves · "+placed+" placés · "+(state.students.length-placed)+" à placer";
@@ -272,26 +286,30 @@ function generatePlacement(students, rows, columns, random=Math.random) {
     $("notice").hidden=!shortage;$("notice").textContent="Il manque "+shortage+" place"+(shortage>1?"s":"")+" pour accueillir toute la classe. Augmentez les rangées ou les tables par rangée.";
     $("shuffle").disabled=!state.students.length;$("clear").disabled=!placed;
     const pupil=state.students.find(s=>s.id===selected);$("selectionBar").hidden=!pupil;if(pupil)$("selectionText").textContent=pupil.name+" — cliquez sur un autre élève pour échanger leurs places.";
-    $("room").style.minWidth=Math.max(340,room.columns*175+50)+"px";$("desks").style.gridTemplateColumns="repeat("+room.columns+",minmax(0,1fr))";$("desks").replaceChildren();
+    $("room").style.minWidth=Math.max(340,rowWidth(room)*88+50)+"px";$("desks").style.gridTemplateColumns=room.tableSizes.map(n=>"minmax(0,"+n+"fr)").join(" ");$("desks").replaceChildren();
     for(let table=0;table<room.rows*room.columns;table++){
-      const desk=element("div","desk");
-      for(let side=0;side<2;side++){
-        const index=table*2+side, student=state.students.find(s=>s.id===room.seats[index]), seat=element("button","seat"+(student?" occupied":"")+(student&&selected===student.id?" active":""));
-        seat.type="button";seat.setAttribute("aria-label",positionText(index)+(student?", "+student.name:", choisir un élève"));seat.append(element("span","seat-number",index%(room.columns*2)+1));
+      const column=table%room.columns,count=room.tableSizes[column],desk=element("div","desk");desk.style.gridTemplateColumns="repeat("+count+",minmax(0,1fr))";
+      for(let side=0;side<count;side++){
+        const index=Math.floor(table/room.columns)*rowWidth(room)+tableOffset(room.tableSizes,column)+side, student=state.students.find(s=>s.id===room.seats[index]), seat=element("button","seat"+(student?" occupied":"")+(student&&selected===student.id?" active":""));
+        seat.type="button";seat.setAttribute("aria-label",positionText(index)+(student?", "+student.name:", choisir un élève"));seat.append(element("span","seat-number",index%(rowWidth(room))+1));
         if(student){applyStudentColor(seat,student);seat.append(element("span","initial",initials(student.name)),element("span","seat-name",student.name));seat.draggable=true;seat.ondragstart=e=>{e.dataTransfer.setData("text/plain",student.id);e.dataTransfer.effectAllowed="move";};seat.ondragend=()=>document.querySelectorAll(".drag-over").forEach(el=>el.classList.remove("drag-over"));}
         else seat.append(element("span","plus","＋"),element("span","empty-label","Choisir un élève"));
         seat.onclick=()=>{if(!student){selected=null;render();openList("pick",index);}else if(selected&&selected!==student.id)placeStudent(selected,index);else{selected=selected===student.id?null:student.id;render();}};
         seat.ondragover=e=>{e.preventDefault();seat.classList.add("drag-over");};seat.ondragleave=()=>seat.classList.remove("drag-over");seat.ondrop=e=>{e.preventDefault();seat.classList.remove("drag-over");const id=e.dataTransfer.getData("text/plain");if(id)placeStudent(id,index);};desk.append(seat);
       }
-      ["left","right"].forEach(side=>{const chair=element("span","chair "+side);chair.setAttribute("aria-hidden","true");desk.append(chair);});$("desks").append(desk);
+      for(let side=0;side<count;side++){const chair=element("span","chair");chair.style.left=((side+.25)/count*100)+"%";chair.style.width=(50/count)+"%";chair.setAttribute("aria-hidden","true");desk.append(chair);}$("desks").append(desk);
     }
   }
   // Keep pupils at the same row, table and seat when the room dimensions change.
-  function resizeRoom() {
+  function resizeRoom(sizes) {
     if(!$("rows").checkValidity()||!$("columns").checkValidity()){$("rows").reportValidity();$("columns").reportValidity();render();return;}
-    const rows=Number($("rows").value), columns=Number($("columns").value), nextSeats=Array(rows*columns*2).fill(null);let displaced=0;
-    for(let row=0;row<room.rows;row++)for(let table=0;table<room.columns;table++)for(let side=0;side<2;side++){const id=room.seats[(row*room.columns+table)*2+side];if(!id)continue;if(row<rows&&table<columns)nextSeats[(row*columns+table)*2+side]=id;else displaced++;}
-    const apply=()=>{room.rows=rows;room.columns=columns;room.seats=nextSeats;selected=null;save();render();};
+    const rows=Number($("rows").value), columns=Number($("columns").value);
+    const tableSizes=Array.from({length:columns},(_,i)=>Array.isArray(sizes)?sizes[i]||2:room.tableSizes[i]||2),width=tableSizes.reduce((a,b)=>a+b,0),nextSeats=Array(rows*width).fill(null);let displaced=0;
+    for(let row=0;row<room.rows;row++)for(let table=0;table<room.columns;table++)for(let side=0;side<room.tableSizes[table];side++){
+      const id=room.seats[row*rowWidth(room)+tableOffset(room.tableSizes,table)+side];if(!id)continue;
+      if(row<rows&&table<columns&&side<tableSizes[table])nextSeats[row*width+tableOffset(tableSizes,table)+side]=id;else displaced++;
+    }
+    const apply=()=>{room.rows=rows;room.columns=columns;room.tableSizes=tableSizes;room.seats=nextSeats;selected=null;save();render();};
     if(displaced){render();confirmAction("Réduire le nombre de tables ?",displaced+" élève"+(displaced>1?"s retourneront":" retournera")+" dans la liste des élèves non placés. Leurs noms seront conservés.",apply);}else apply();
   }
   function resizeStudents() {
@@ -318,7 +336,7 @@ function generatePlacement(students, rows, columns, random=Math.random) {
   $("newClassName").oninput=()=>$("newClassName").setCustomValidity("");
   $("studentForm").onsubmit=e=>{e.preventDefault();const names=$("names").value.split(/\r?\n/).map(n=>n.trim()).filter(Boolean);if(!names.length){$("names").setCustomValidity("Saisissez au moins un nom.");$("names").reportValidity();return;}if(!editing&&state.students.length+names.length>200){$("names").setCustomValidity("La classe peut contenir au maximum 200 élèves.");$("names").reportValidity();return;}if(editing){const student=state.students.find(s=>s.id===editing);if(student)student.name=names.join(" ");}else state.students.push(...names.map(name=>({id:makeId(),name})));save();render();$("studentDialog").close();};
   $("names").oninput=()=>$("names").setCustomValidity("");$("cancelSelection").onclick=()=>{selected=null;render();};$("unplace").onclick=()=>{room.seats=room.seats.map(id=>id===selected?null:id);selected=null;save();render();};
-  $("shuffle").onclick=()=>{const apply=()=>{const result=generatePlacement(state.students,room.rows,room.columns);if(result.error){confirmAction("Placement non modifié",result.error,()=>{});return;}room.seats=result.seats;selected=null;save();render();notify(result.unplaced?result.unplaced+" élèves restent à placer : il manque des places.":"Placement effectué : couleurs séparées et premier rang respecté.");};if(room.seats.some(Boolean))confirmAction("Redistribuer les places ?","Les priorités de premier rang et la séparation des couleurs seront respectées. Le plan actuel sera conservé si aucun placement n’est trouvé.",apply);else apply();};
+  $("shuffle").onclick=()=>{const apply=()=>{const result=generatePlacement(state.students,room.rows,room.tableSizes);if(result.error){confirmAction("Placement non modifié",result.error,()=>{});return;}room.seats=result.seats;selected=null;save();render();notify(result.unplaced?result.unplaced+" élèves restent à placer : il manque des places.":"Placement effectué : couleurs séparées et premier rang respecté.");};if(room.seats.some(Boolean))confirmAction("Redistribuer les places ?","Les priorités de premier rang et la séparation des couleurs seront respectées. Le plan actuel sera conservé si aucun placement n’est trouvé.",apply);else apply();};
   $("clear").onclick=()=>confirmAction("Libérer toutes les places ?","Les élèves resteront dans votre liste.",()=>{room.seats.fill(null);selected=null;save();render();});
   $("cancelConfirm").onclick=()=>{confirmation=null;$("confirmDialog").close();};$("acceptConfirm").onclick=()=>{const action=confirmation;confirmation=null;$("confirmDialog").close();if(action)action();};$("confirmDialog").addEventListener("cancel",()=>confirmation=null);
   $("createFirstClass").onclick=()=>{$("classesDialog").showModal();renderClasses();$("newClassName").focus();};
@@ -353,7 +371,7 @@ function generatePlacement(students, rows, columns, random=Math.random) {
     $("authPanel").hidden=!!status.user;
     $("accountControls").hidden=!status.user;
     $("classControls").hidden=!status.user;
-    $("accountName").textContent=status.user?.displayName||status.user?.email||"";
+    $("accountName").replaceChildren();const avatar=element("span","account-avatar");renderAvatar(avatar,status.user);$("accountName").append(avatar,element("span","",status.user?.displayName||status.user?.email||""));
     $("logoutButton").disabled=status.pending;
     const text=status.error?"Erreur de synchronisation : "+status.error.message:status.offline?(status.pending?"Hors ligne · modifications en attente":"Hors ligne · données en cache"):status.pending?"Synchronisation en cours…":status.fromCache?"Données en cache · connexion au serveur…":ready?"Données synchronisées":"Chargement des classes…";
     $("syncStatus").hidden=!status.user;$("syncStatus").textContent=text;$("saveStatus").textContent=text;

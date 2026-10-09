@@ -29,30 +29,31 @@ export function createClassPdf(room, canvas = document.createElement('canvas'), 
   text('TABLEAU', width / 2, 118, 17, '#ffffff');
   const left = 40, top = 156, areaWidth = width - 80, areaHeight = height - top - 54;
   const gapX = 18, gapY = 16;
-  const deskWidth = (areaWidth - gapX * (room.columns - 1)) / room.columns;
+  const sizes=Array.from({length:room.columns},(_,i)=>room.tableSizes?.[i]||2),rowWidth=sizes.reduce((a,b)=>a+b,0);
+  const seatWidth=(areaWidth-gapX*(room.columns-1))/rowWidth;
   const deskHeight = (areaHeight - gapY * (room.rows - 1)) / room.rows;
   const students = new Map(room.students.map(s => [s.id, s.name]));
   for (let row = 0; row < room.rows; row++) {
     for (let column = 0; column < room.columns; column++) {
-      const x = left + column * (deskWidth + gapX), y = top + row * (deskHeight + gapY);
+      const count=sizes[column],offset=sizes.slice(0,column).reduce((a,b)=>a+b,0),deskWidth=seatWidth*count;
+      const x = left + offset*seatWidth+column*gapX, y = top + row * (deskHeight + gapY);
       ctx.fillStyle = palette.fill;
       rounded(x,y,deskWidth,deskHeight,10);
       ctx.strokeStyle = palette.line;
       ctx.lineWidth = 1.5;
       ctx.stroke();
       ctx.fillStyle=palette.line;
-      rounded(x+deskWidth*.12,y+deskHeight+3,deskWidth*.25,4,2);
-      rounded(x+deskWidth*.63,y+deskHeight+3,deskWidth*.25,4,2);
-      ctx.beginPath();ctx.moveTo(x + deskWidth / 2, y);ctx.lineTo(x + deskWidth / 2, y + deskHeight);ctx.stroke();
-      for (let side = 0; side < 2; side++) {
-        const name = students.get(room.seats[(row * room.columns + column) * 2 + side]);
-        const center = x + deskWidth * (side ? 0.75 : 0.25);
+      for(let side=0;side<count;side++)rounded(x+seatWidth*(side+.25),y+deskHeight+3,seatWidth*.5,4,2);
+      for(let divider=1;divider<count;divider++){ctx.beginPath();ctx.moveTo(x+seatWidth*divider,y);ctx.lineTo(x+seatWidth*divider,y+deskHeight);ctx.stroke();}
+      for (let side = 0; side < count; side++) {
+        const name = students.get(room.seats[row*rowWidth+offset+side]);
+        const center = x + seatWidth*(side+.5);
         if (!name) { text('Libre', center, y + deskHeight / 2 + 6, Math.min(18, deskHeight / 3), '#7c8a9c');continue; }
         const words = name.trim().split(/\s+/);
         const lines = words.length > 1 ? [words[0], words.slice(1).join(' ')] : [name];
-        const size = Math.min(26, deskHeight / 3, deskWidth / 10);
+        const size = Math.min(26, deskHeight / 3, seatWidth / 5);
         const lineHeight = size * 1.25;
-        lines.forEach((line, i) => text(line, center, y + deskHeight / 2 + (i - (lines.length - 1) / 2) * lineHeight + size * 0.35, size, palette.ink, deskWidth / 2 - 16));
+        lines.forEach((line, i) => text(line, center, y + deskHeight / 2 + (i - (lines.length - 1) / 2) * lineHeight + size * 0.35, size, palette.ink, seatWidth - 16));
       }
     }
   }
