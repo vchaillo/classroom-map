@@ -1,5 +1,5 @@
 // Render at twice the projection resolution to keep names sharp when zooming.
-export function createClassPdf(room, canvas = document.createElement('canvas'), variant = 1) {
+export function createClassPdf(room, canvas = document.createElement('canvas'), accent = "#315fe8") {
   const width = 1600, height = 900, scale = 2;
   canvas.width = width * scale;
   canvas.height = height * scale;
@@ -16,16 +16,16 @@ export function createClassPdf(room, canvas = document.createElement('canvas'), 
     }
     ctx.fillText(value, x, y, maxWidth);
   };
-  const palette=variant===2?{ink:'#183a39',line:'#9ebcb8',fill:'#f0f7f5',board:'#24534c'}:variant===3?{ink:'#2a2d34',line:'#999fa8',fill:'#ffffff',board:'#303640'}:{ink:'#14243c',line:'#b1c2d8',fill:'#f2f6fc',board:'#263f60'};
+  const base=/^#[0-9a-f]{6}$/i.test(accent)?accent:'#315fe8';
+  const mix=(target,weight)=>'#'+[1,3,5].map(i=>Math.round(parseInt(base.slice(i,i+2),16)*(1-weight)+parseInt(target.slice(i,i+2),16)*weight).toString(16).padStart(2,'0')).join('');
+  const palette={ink:mix('#14243c',.85),line:mix('#ffffff',.66),fill:mix('#ffffff',.96),board:mix('#14243c',.62)};
   const rounded=(x,y,w,h,r)=>{ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fill();};
-  if(variant===2){ctx.fillStyle='#f0f7f5';ctx.fillRect(0,0,width,78);}
-  if(variant===3){ctx.fillStyle=palette.ink;ctx.fillRect(40,22,5,50);}
-  ctx.textAlign = variant===3?'left':'center';
-  text(room.className,variant===3?64:width/2,46,32,palette.ink,width-150);
-  text(room.name||'Salle',variant===3?64:width/2,71,18,'#63748a',width-150);
+  ctx.textAlign='center';
+  text(room.className,width/2,46,32,palette.ink,width-150);
+  text(room.name||'Salle',width/2,71,18,'#63748a',width-150);
   ctx.textAlign='center';
   ctx.fillStyle = palette.board;
-  rounded(540, 94, 520, 36,variant===3?2:9);
+  rounded(540, 94, 520, 36,9);
   text('TABLEAU', width / 2, 118, 17, '#ffffff');
   const left = 40, top = 156, areaWidth = width - 80, areaHeight = height - top - 54;
   const gapX = 18, gapY = 16;
@@ -36,12 +36,13 @@ export function createClassPdf(room, canvas = document.createElement('canvas'), 
     for (let column = 0; column < room.columns; column++) {
       const x = left + column * (deskWidth + gapX), y = top + row * (deskHeight + gapY);
       ctx.fillStyle = palette.fill;
-      rounded(x,y,deskWidth,deskHeight,variant===3?2:10);
+      rounded(x,y,deskWidth,deskHeight,10);
       ctx.strokeStyle = palette.line;
       ctx.lineWidth = 1.5;
       ctx.stroke();
-      if(variant===1){ctx.fillStyle='#dce6f4';ctx.fillRect(x+10,y+deskHeight-4,deskWidth-20,3);}
-      if(variant===2){ctx.fillStyle=palette.line;rounded(x+deskWidth*.12,y+deskHeight+3,deskWidth*.25,4,2);rounded(x+deskWidth*.63,y+deskHeight+3,deskWidth*.25,4,2);}
+      ctx.fillStyle=palette.line;
+      rounded(x+deskWidth*.12,y+deskHeight+3,deskWidth*.25,4,2);
+      rounded(x+deskWidth*.63,y+deskHeight+3,deskWidth*.25,4,2);
       ctx.beginPath();ctx.moveTo(x + deskWidth / 2, y);ctx.lineTo(x + deskWidth / 2, y + deskHeight);ctx.stroke();
       for (let side = 0; side < 2; side++) {
         const name = students.get(room.seats[(row * room.columns + column) * 2 + side]);
@@ -86,11 +87,11 @@ function imagePdf(jpeg, pixelWidth, pixelHeight) {
   return new Blob(chunks, {type:'application/pdf'});
 }
 
-export function downloadClassPdf(room, variant = 1) {
-  const url = URL.createObjectURL(createClassPdf(room, undefined, variant));
+export function downloadClassPdf(room, accent = "#315fe8") {
+  const url = URL.createObjectURL(createClassPdf(room, undefined, accent));
   const link = document.createElement('a');
   link.href = url;
-  link.download = `plan-${room.className.replace(/[^\p{L}\p{N}-]+/gu, '-').replace(/^-|-$/g, '') || 'classe'}-v${variant}.pdf`;
+  link.download = `plan-${room.className.replace(/[^\p{L}\p{N}-]+/gu, '-').replace(/^-|-$/g, '') || 'classe'}.pdf`;
   document.body.append(link);link.click();link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
