@@ -1,4 +1,4 @@
-import { downloadClassPdf } from "./export-pdf.js";
+import { downloadClassPdf } from "./export-pdf.js?v=designs-1";
 import { connect, login, logout, persist } from "./firebase.js";
 // Adjacent seats share an edge: immediate horizontal or vertical neighbours.
 function generatePlacement(students, rows, columns, random=Math.random) {
@@ -279,7 +279,7 @@ function generatePlacement(students, rows, columns, random=Math.random) {
     const removed=state.students.slice(count);render();
     confirmAction("Réduire la liste à "+count+" élèves ?","Les "+removed.length+" derniers élèves seront supprimés : "+removed.slice(0,4).map(s=>s.name).join(", ")+(removed.length>4?", …":".")+" Vous pouvez aussi les supprimer individuellement.",()=>{const ids=new Set(removed.map(s=>s.id));state.students=state.students.slice(0,count);state.rooms.forEach(r=>{r.seats=r.seats.map(id=>ids.has(id)?null:id);});if(ids.has(selected))selected=null;save();render();});
   }
-  $("exportPdf").onclick=()=>{if(!state)return;finishRename();try{downloadClassPdf({...room,students:state.students,className:state.className+" — "+room.name});}catch(error){notify("Impossible de générer le PDF : "+error.message);}};
+  [1,2,3].forEach(variant=>{$("exportPdf"+variant).onclick=()=>{if(!state)return;finishRename();try{downloadClassPdf({...room,students:state.students,className:state.className},variant);}catch(error){notify("Impossible de générer le PDF : "+error.message);}};});
   $("rows").onchange=resizeRoom;$("columns").onchange=resizeRoom;$("studentNumber").onchange=resizeStudents;
   $("manageStudents").onclick=()=>openList();$("closeList").onclick=()=>$("listDialog").close();$("addButton").onclick=()=>openStudentDialog();$("search").oninput=renderList;
   $("closeStudentDialog").onclick=()=>$("studentDialog").close();
@@ -333,7 +333,7 @@ function generatePlacement(students, rows, columns, random=Math.random) {
     $("accountName").textContent=status.user?.displayName||status.user?.email||"";
     $("logoutButton").disabled=status.pending;
     const text=status.error?"Erreur de synchronisation : "+status.error.message:status.offline?(status.pending?"Hors ligne · modifications en attente":"Hors ligne · données en cache"):status.pending?"Synchronisation en cours…":status.fromCache?"Données en cache · connexion au serveur…":ready?"Données synchronisées":"Chargement des classes…";
-    $("syncStatus").textContent=text;$("saveStatus").textContent=text;
+    $("syncStatus").hidden=!status.user;$("syncStatus").textContent=text;$("saveStatus").textContent=text;
     if(status.error){$("authMessage").textContent=text;notify(text);}
   });
   // Require both ends of the pointer gesture to be outside the dialog.
