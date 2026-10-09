@@ -105,6 +105,7 @@ function generatePlacement(students, rows, columns, random=Math.random) {
     });
     return {id:typeof saved.id==="string"?saved.id:makeId(),className:typeof saved.className==="string"&&saved.className.trim()?saved.className.slice(0,60):"Ma classe",students,rooms,activeRoom:rooms.some(r=>r.id===saved.activeRoom)?saved.activeRoom:rooms[0].id};
   }
+  let currentUser=null;
   let data={classes:[],active:null}, state=null, room=null, ready=false;
   let selected=null, editing=null, targetSeat=null, listMode="manage", returnToList=false, confirmation=null, toastTimer;
   const initials = name => name.trim().split(/\s+/).slice(0,2).map(p=>p[0]).join("").toUpperCase();
@@ -118,7 +119,7 @@ function generatePlacement(students, rows, columns, random=Math.random) {
   function renderList() {
     const picker=listMode==="pick";
     $("listTitle").textContent=picker?"Choisir un élève":"Élèves de la classe";
-    $("listDescription").textContent=picker?positionText(targetSeat)+". Seuls les élèves non placés apparaissent ici.":"Cliquez sur la pastille pour choisir une couleur personnelle. La flèche ↑ active la priorité au premier rang. Ces repères restent invisibles dans le PDF.";
+    $("listDescription").textContent=picker?positionText(targetSeat)+". Seuls les élèves non placés apparaissent ici.":"Cliquez sur la pastille pour choisir une couleur personnelle. La main levée active la priorité au premier rang. Ces repères restent invisibles dans le PDF.";
     const available=state.students.filter(s=>!picker||!room.seats.includes(s.id)), query=$("search").value.trim().toLocaleLowerCase("fr"), filtered=available.filter(s=>s.name.toLocaleLowerCase("fr").includes(query));
     $("listCount").textContent=available.length+" élève"+(available.length>1?"s":"")+(picker?" à placer":" dans la classe");
     $("studentList").replaceChildren();
@@ -133,7 +134,8 @@ function generatePlacement(students, rows, columns, random=Math.random) {
       if(picker)item.append(element("span","","＋"));
       else {
         item.append(colorPicker(student));
-        const priority=element("button","front-row-toggle"+(student.frontRow?" enabled":""),"↑");
+        const priority=element("button","front-row-toggle"+(student.frontRow?" enabled":""));
+        priority.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 12V5a1.5 1.5 0 0 1 3 0v6-8a1.5 1.5 0 0 1 3 0v8-6a1.5 1.5 0 0 1 3 0v7-3a1.5 1.5 0 0 1 3 0v7c0 4-2.5 6-6 6h-1c-2 0-3.5-1-4.5-2.5L4 13a1.5 1.5 0 0 1 2.5-1.5L8 14"/></svg>';
         priority.type="button";priority.title="Placer au premier rang lors de la répartition automatique";
         priority.setAttribute("aria-label","Premier rang pour "+student.name);priority.setAttribute("aria-pressed",String(!!student.frontRow));
         priority.onclick=()=>{student.frontRow=!student.frontRow;save();renderList();};item.append(priority);
@@ -208,10 +210,34 @@ function generatePlacement(students, rows, columns, random=Math.random) {
   $("closeRooms").onclick=()=>$("roomsDialog").close();
   $("newRoomForm").onsubmit=e=>{e.preventDefault();const name=$("newRoomName").value.trim().replace(/\s+/g," ");if(!name){$("newRoomName").setCustomValidity("Saisissez le nom de la salle.");$("newRoomName").reportValidity();return;}const created=makeRoom(name.slice(0,60));state.rooms.push(created);switchRoom(created.id);$("newRoomName").value="";$("roomsDialog").close();};
   $("newRoomName").oninput=()=>$("newRoomName").setCustomValidity("");
+  function renderProfile() {
+    const profile=location.hash==="#profile"&&!!currentUser;
+    $("profilePanel").hidden=!profile;
+    $("planPanel").hidden=profile||!ready||!state;
+    $("emptyPanel").hidden=profile||!ready||!!state;
+    $("profileName").textContent=currentUser?.displayName||"Professeur";
+    $("profileEmail").textContent=currentUser?.email||"Non renseignée";
+    const created=currentUser?.metadata?.creationTime;
+    $("profileCreated").textContent=created&&!Number.isNaN(Date.parse(created))?new Intl.DateTimeFormat("fr-FR",{dateStyle:"long"}).format(new Date(created)):"Non disponible";
+    $("profileClasses").textContent=data.classes.length;
+    $("profileRooms").textContent=data.classes.reduce((total,c)=>total+c.rooms.length,0);
+    $("profileStudents").textContent=data.classes.reduce((total,c)=>total+c.students.length,0);
+    $("profileSummary").replaceChildren();
+    if(!ready&&currentUser){$("profileSummary").append(element("p","","Chargement de vos classes…"));return;}
+    if(!data.classes.length)$("profileSummary").append(element("p","","Vous n’avez pas encore créé de classe."));
+    data.classes.forEach(c=>{
+      const row=element("div","profile-class"),info=element("div");
+      info.append(element("strong","",c.className),element("p","",c.students.length+" élèves · "+c.rooms.length+" salle"+(c.rooms.length>1?"s":"")));
+      const open=element("a","profile-open","Ouvrir la classe");open.href="#plan";
+      open.onclick=()=>switchClass(c.id);row.append(info,open);$("profileSummary").append(row);
+    });
+  }
+  addEventListener("hashchange",renderProfile);
   function render() {
     renderClassSelect();
     $("planPanel").hidden=!ready||!state;
     $("emptyPanel").hidden=!ready||!!state;
+    renderProfile();
     $("classSelect").disabled=!ready||!state;
     $("manageClasses").disabled=!ready;
     if(!state)return;
@@ -299,6 +325,8 @@ function generatePlacement(students, rows, columns, random=Math.random) {
       if($("listDialog").open&&state)renderList();
     }catch(error){$("authMessage").textContent="Impossible de charger les classes : "+error.message;}
   },status=>{
+    currentUser=status.user||null;
+    renderProfile();
     $("authPanel").hidden=!!status.user;
     $("accountControls").hidden=!status.user;
     $("classControls").hidden=!status.user;
