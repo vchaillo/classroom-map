@@ -1,4 +1,4 @@
-import { downloadClassPdf } from "./export-pdf.js?v=designs-1";
+import { downloadClassPdf } from "./export-pdf.js?v=final-theme-1";
 import { connect, login, logout, persist } from "./firebase.js?v=appearance-1";
 // Adjacent seats share an edge: immediate horizontal or vertical neighbours.
 function generatePlacement(students, rows, columns, random=Math.random) {
@@ -63,7 +63,7 @@ function generatePlacement(students, rows, columns, random=Math.random) {
     const prefs=data.preferences,root=document.documentElement;
     root.dataset.theme=prefs.theme==="system"?(systemTheme.matches?"dark":"light"):prefs.theme;
     root.style.setProperty("--accent",prefs.accent);
-    studentColors.forEach((color,i)=>{color.border=prefs.colors[i];color.background="color-mix(in srgb, "+color.border+" 16%, var(--surface))";});
+    studentColors.forEach((color,i)=>{color.name="Groupe "+(i+1);color.border=prefs.colors[i];color.background="color-mix(in srgb, "+color.border+" 16%, var(--surface))";});
     $("themeMode").value=prefs.theme;$("accentColor").value=prefs.accent;
     defaultColors.forEach((color,i)=>{$("palette"+i).value=prefs.colors[i];});
   }
@@ -233,7 +233,7 @@ function generatePlacement(students, rows, columns, random=Math.random) {
   $("newRoomForm").onsubmit=e=>{e.preventDefault();const name=$("newRoomName").value.trim().replace(/\s+/g," ");if(!name){$("newRoomName").setCustomValidity("Saisissez le nom de la salle.");$("newRoomName").reportValidity();return;}const created=makeRoom(name.slice(0,60));state.rooms.push(created);switchRoom(created.id);$("newRoomName").value="";$("roomsDialog").close();};
   $("newRoomName").oninput=()=>$("newRoomName").setCustomValidity("");
   function renderProfile() {
-    const profile=location.hash==="#profile"&&!!currentUser;
+    const profile=location.hash.startsWith("#profile")&&!!currentUser;
     $("profilePanel").hidden=!profile;
     $("planPanel").hidden=profile||!ready||!state;
     $("emptyPanel").hidden=profile||!ready||!!state;
@@ -301,7 +301,7 @@ function generatePlacement(students, rows, columns, random=Math.random) {
     const removed=state.students.slice(count);render();
     confirmAction("Réduire la liste à "+count+" élèves ?","Les "+removed.length+" derniers élèves seront supprimés : "+removed.slice(0,4).map(s=>s.name).join(", ")+(removed.length>4?", …":".")+" Vous pouvez aussi les supprimer individuellement.",()=>{const ids=new Set(removed.map(s=>s.id));state.students=state.students.slice(0,count);state.rooms.forEach(r=>{r.seats=r.seats.map(id=>ids.has(id)?null:id);});if(ids.has(selected))selected=null;save();render();});
   }
-  [1,2,3].forEach(variant=>{$("exportPdf"+variant).onclick=()=>{if(!state)return;finishRename();try{downloadClassPdf({...room,students:state.students,className:state.className},variant);}catch(error){notify("Impossible de générer le PDF : "+error.message);}};});
+  $("exportPdf").onclick=()=>{if(!state)return;finishRename();try{downloadClassPdf({...room,students:state.students,className:state.className},data.preferences.accent);}catch(error){notify("Impossible de générer le PDF : "+error.message);}};
   $("rows").onchange=resizeRoom;$("columns").onchange=resizeRoom;$("studentNumber").onchange=resizeStudents;
   $("manageStudents").onclick=()=>openList();$("closeList").onclick=()=>$("listDialog").close();$("addButton").onclick=()=>openStudentDialog();$("search").oninput=renderList;
   $("closeStudentDialog").onclick=()=>$("studentDialog").close();
