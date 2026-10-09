@@ -102,6 +102,7 @@ function generatePlacement(students, rows, columns, random=Math.random) {
     });
     picker.append(summary,choices);return picker;
   }
+  const raisedHandIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 12V5a1.5 1.5 0 0 1 3 0v6-8a1.5 1.5 0 0 1 3 0v8-6a1.5 1.5 0 0 1 3 0v7-3a1.5 1.5 0 0 1 3 0v7c0 4-2.5 6-6 6h-1c-2 0-3.5-1-4.5-2.5L4 13a1.5 1.5 0 0 1 2.5-1.5L8 14"/></svg>';
   let serial = 0;
   const makeId = () => Date.now().toString(36) + "-" + (++serial) + "-" + Math.random().toString(36).slice(2,8);
   function makeRoom(name="Salle 1") {
@@ -160,7 +161,7 @@ function generatePlacement(students, rows, columns, random=Math.random) {
       else {
         item.append(colorPicker(student));
         const priority=element("button","front-row-toggle"+(student.frontRow?" enabled":""));
-        priority.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 12V5a1.5 1.5 0 0 1 3 0v6-8a1.5 1.5 0 0 1 3 0v8-6a1.5 1.5 0 0 1 3 0v7-3a1.5 1.5 0 0 1 3 0v7c0 4-2.5 6-6 6h-1c-2 0-3.5-1-4.5-2.5L4 13a1.5 1.5 0 0 1 2.5-1.5L8 14"/></svg>';
+        priority.innerHTML=raisedHandIcon;
         priority.type="button";priority.title="Placer au premier rang lors de la répartition automatique";
         priority.setAttribute("aria-label","Premier rang pour "+student.name);priority.setAttribute("aria-pressed",String(!!student.frontRow));
         priority.onclick=()=>{student.frontRow=!student.frontRow;save();renderList();};item.append(priority);
@@ -292,7 +293,7 @@ function generatePlacement(students, rows, columns, random=Math.random) {
       for(let side=0;side<count;side++){
         const index=Math.floor(table/room.columns)*rowWidth(room)+tableOffset(room.tableSizes,column)+side, student=state.students.find(s=>s.id===room.seats[index]), seat=element("button","seat"+(student?" occupied":"")+(student&&selected===student.id?" active":""));
         seat.type="button";seat.setAttribute("aria-label",positionText(index)+(student?", "+student.name:", choisir un élève"));seat.append(element("span","seat-number",index%(rowWidth(room))+1));
-        if(student){applyStudentColor(seat,student);seat.append(element("span","initial",initials(student.name)),element("span","seat-name",student.name));seat.draggable=true;seat.ondragstart=e=>{e.dataTransfer.setData("text/plain",student.id);e.dataTransfer.effectAllowed="move";};seat.ondragend=()=>document.querySelectorAll(".drag-over").forEach(el=>el.classList.remove("drag-over"));}
+        if(student){if(student.frontRow){const badge=element("span","seat-priority");badge.innerHTML=raisedHandIcon;badge.title="Priorité au premier rang";badge.setAttribute("aria-hidden","true");seat.append(badge);seat.setAttribute("aria-label",positionText(index)+", "+student.name+", priorité au premier rang");}applyStudentColor(seat,student);seat.append(element("span","initial",initials(student.name)),element("span","seat-name",student.name));seat.draggable=true;seat.ondragstart=e=>{e.dataTransfer.setData("text/plain",student.id);e.dataTransfer.effectAllowed="move";};seat.ondragend=()=>document.querySelectorAll(".drag-over").forEach(el=>el.classList.remove("drag-over"));}
         else seat.append(element("span","plus","＋"),element("span","empty-label","Choisir un élève"));
         seat.onclick=()=>{if(!student){selected=null;render();openList("pick",index);}else if(selected&&selected!==student.id)placeStudent(selected,index);else{selected=selected===student.id?null:student.id;render();}};
         seat.ondragover=e=>{e.preventDefault();seat.classList.add("drag-over");};seat.ondragleave=()=>seat.classList.remove("drag-over");seat.ondrop=e=>{e.preventDefault();seat.classList.remove("drag-over");const id=e.dataTransfer.getData("text/plain");if(id)placeStudent(id,index);};desk.append(seat);
