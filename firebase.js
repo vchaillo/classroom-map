@@ -11,7 +11,7 @@ const app = initializeApp({
   appId: '1:34629391255:web:7caeab509e37ba43246ad2'
 });
 const auth = getAuth(app);
-let db, user, unsubscribe, unsubscribeProfile, known = new Map(), pending = 0, generation = 0, lastSnapshot, active = null;
+let db, user, unsubscribe, unsubscribeProfile, known = new Map(), pending = 0, generation = 0, lastSnapshot, active = null, preferences = {};
 let receive, report;
 let trusted = false;
 try { trusted = localStorage.getItem('classroom-map-trusted-device') === 'true'; } catch {}
@@ -31,6 +31,7 @@ export function connect(onData, onStatus) {
     pending = 0;
     lastSnapshot = null;
     active = null;
+    preferences = {};
     receive(null);
     status();
     if (!user) return;
@@ -41,6 +42,7 @@ export function connect(onData, onStatus) {
     unsubscribeProfile = onSnapshot(doc(db, 'users', user.uid), profile => {
       if (session !== generation || pending) return;
       active = profile.data()?.active || null;
+      preferences = profile.data()?.preferences || {};
       if (lastSnapshot) applySnapshot(lastSnapshot);
     }, error => status(error));
     unsubscribe = onSnapshot(collection(db, 'users', user.uid, 'classes'), { includeMetadataChanges: true }, snapshot => {
@@ -57,7 +59,7 @@ export function connect(onData, onStatus) {
 function applySnapshot(snapshot) {
   const classes = snapshot.docs.map(d => ({ ...d.data(), id: d.id }));
   known = new Map(classes.map(c => [c.id, JSON.stringify(c)]));
-  receive({ classes, active, fromCache: snapshot.metadata.fromCache });
+  receive({ classes, active, preferences, fromCache: snapshot.metadata.fromCache });
 }
 export async function login(remember) {
   if (!navigator.onLine) throw new Error('La première connexion nécessite Internet.');
@@ -77,9 +79,10 @@ export function persist(data) {
   const next = new Map(data.classes.map(c => [c.id, JSON.stringify(c)]));
   const batch = writeBatch(db);
   let changed = false;
-  if (active !== data.active) {
-    batch.set(doc(db, 'users', user.uid), { active: data.active }, { merge: true });
+  if (active !== data.active || JSON.stringify(preferences) !== JSON.stringify(data.preferences)) {
+    batch.set(doc(db, 'users', user.uid), { active: data.active, preferences: data.preferences }, { merge: true });
     active = data.active;
+    preferences = structuredClone(data.preferences);
     changed = true;
   }
   for (const c of data.classes) {

@@ -1,5 +1,5 @@
 import { downloadClassPdf } from "./export-pdf.js?v=designs-1";
-import { connect, login, logout, persist } from "./firebase.js";
+import { connect, login, logout, persist } from "./firebase.js?v=appearance-1";
 // Adjacent seats share an edge: immediate horizontal or vertical neighbours.
 function generatePlacement(students, rows, columns, random=Math.random) {
   const width=columns*2,capacity=rows*width;
@@ -53,6 +53,28 @@ function generatePlacement(students, rows, columns, random=Math.random) {
     {id:"blue",name:"Bleu",border:"#478ecb",background:"#deefff"},
     {id:"green",name:"Vert",border:"#479d76",background:"#ddf5e7"}
   ];
+  const defaultColors=studentColors.map(c=>c.border);
+  const systemTheme=matchMedia("(prefers-color-scheme: dark)");
+  function normalizePreferences(value={}) {
+    const hex=(color,fallback)=>typeof color==="string"&&/^#[0-9a-f]{6}$/i.test(color)?color:fallback;
+    return {theme:["light","dark","system"].includes(value?.theme)?value.theme:"system",accent:hex(value?.accent,"#315fe8"),colors:defaultColors.map((color,i)=>hex(value?.colors?.[i],color))};
+  }
+  function applyAppearance() {
+    const prefs=data.preferences,root=document.documentElement;
+    root.dataset.theme=prefs.theme==="system"?(systemTheme.matches?"dark":"light"):prefs.theme;
+    root.style.setProperty("--accent",prefs.accent);
+    studentColors.forEach((color,i)=>{color.border=prefs.colors[i];color.background="color-mix(in srgb, "+color.border+" 16%, var(--surface))";});
+    $("themeMode").value=prefs.theme;$("accentColor").value=prefs.accent;
+    defaultColors.forEach((color,i)=>{$("palette"+i).value=prefs.colors[i];});
+  }
+  function updateAppearance() {
+    data.preferences=normalizePreferences({theme:$("themeMode").value,accent:$("accentColor").value,colors:defaultColors.map((_,i)=>$("palette"+i).value)});
+    applyAppearance();save();render();if($("listDialog").open&&state)renderList();
+  }
+  $("themeMode").onchange=updateAppearance;$("accentColor").onchange=updateAppearance;
+  defaultColors.forEach((_,i)=>{$("palette"+i).onchange=updateAppearance;});
+  $("resetAppearance").onclick=()=>{data.preferences=normalizePreferences();applyAppearance();save();render();};
+  systemTheme.addEventListener("change",()=>{if(data.preferences.theme==="system")applyAppearance();});
   function applyStudentColor(node, student) {
     const color=studentColors.find(c=>c.id===student.color);
     if(!color)return;
@@ -106,7 +128,7 @@ function generatePlacement(students, rows, columns, random=Math.random) {
     return {id:typeof saved.id==="string"?saved.id:makeId(),className:typeof saved.className==="string"&&saved.className.trim()?saved.className.slice(0,60):"Ma classe",students,rooms,activeRoom:rooms.some(r=>r.id===saved.activeRoom)?saved.activeRoom:rooms[0].id};
   }
   let currentUser=null;
-  let data={classes:[],active:null}, state=null, room=null, ready=false;
+  let data={classes:[],active:null,preferences:normalizePreferences()}, state=null, room=null, ready=false;
   let selected=null, editing=null, targetSeat=null, listMode="manage", returnToList=false, confirmation=null, toastTimer;
   const initials = name => name.trim().split(/\s+/).slice(0,2).map(p=>p[0]).join("").toUpperCase();
   const positionText = index => "Rangée "+(Math.floor(index/(room.columns*2))+1)+" · place "+(index%(room.columns*2)+1);
@@ -308,14 +330,15 @@ function generatePlacement(students, rows, columns, random=Math.random) {
   $("logoutButton").onclick=async()=>{try{await logout();}catch(error){notify(error.message);}};
   $("trustedDevice").checked=connect(remote=>{
     if(!remote){
-      ready=false;data={classes:[],active:null};state=null;room=null;selected=null;returnToList=false;
+      ready=false;data={classes:[],active:null,preferences:normalizePreferences()};state=null;room=null;selected=null;returnToList=false;applyAppearance();
       document.querySelectorAll("dialog[open]").forEach(d=>d.close());
       render();return;
     }
     try{
       const classes=remote.classes.map(normalizeClass);
       const active=remote.active||data.active;
-      data={classes,active:classes.some(c=>c.id===active)?active:classes[0]?.id||null};
+      data={classes,active:classes.some(c=>c.id===active)?active:classes[0]?.id||null,preferences:normalizePreferences(remote.preferences)};
+      applyAppearance();
       state=classes.find(c=>c.id===data.active)||null;
       room=state?.rooms.find(r=>r.id===state.activeRoom)||null;
       if(!state?.students.some(s=>s.id===selected))selected=null;
@@ -345,5 +368,6 @@ function generatePlacement(students, rows, columns, random=Math.random) {
     dialog.addEventListener("cancel",()=>{if(dialog.id==="studentDialog")returnToList=false;});
     dialog.addEventListener("close",()=>{if(dialog.id==="confirmDialog")confirmation=null;});
   });
+  applyAppearance();
   render();
 })();
